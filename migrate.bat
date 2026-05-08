@@ -38,9 +38,9 @@ echo.
 :: --------------------------------------------------------
 echo [Trin 2/5] Installerer programpakker...
 if not exist "node_modules" (
-    echo   Koerer npm install (kun foerste gang)...
+    echo   Koerer npm install ^(kun foerste gang^)...
     npm install
-    if %errorlevel% neq 0 (
+    if !errorlevel! neq 0 (
         echo.
         echo   FEJL: npm install mislykkedes. Tjek at du er forbundet til internettet.
         pause
@@ -60,7 +60,7 @@ set ENV_FILE=%~dp0.env
 
 if exist "%ENV_FILE%" (
     echo   Fundet eksisterende .env - genbruger konfiguration.
-    echo   (Slet .env for at aendre indstillingerne)
+    echo   ^(Slet .env for at aendre indstillingerne^)
     :: Laes eksisterende .env
     for /f "usebackq tokens=1,* delims==" %%a in ("%ENV_FILE%") do (
         set "line_key=%%a"
@@ -69,10 +69,10 @@ if exist "%ENV_FILE%" (
         if /i "!line_key!"=="ACTUAL_PASSWORD" set "ACTUAL_PASSWORD=!line_val!"
     )
     echo   URL:      !ACTUAL_SERVER_URL!
-    echo   Password: (skjult)
+    echo   Password: ^(skjult^)
 ) else (
     echo.
-    echo   Actual Budget kan koere som Desktop App (ingen server) eller pa en server.
+    echo   Actual Budget kan koere som Desktop App ^(ingen server^) eller pa en server.
     echo   Desktop App: download fra https://actualbudget.org/download
     echo               start den, saet et password, og brug URL: http://localhost:5006
     echo.
@@ -137,11 +137,11 @@ echo [Trin 5/5] Starter migreringen...
 echo.
 echo   Trin 5a: Opretter kategorier i Actual Budget...
 node "%~dp0scripts\initialize_budget.cjs" "!CSV_FILE!"
-if %errorlevel% neq 0 (
+if !errorlevel! neq 0 (
     echo.
     echo   FEJL i initialize_budget. Se fejlbesked ovenfor.
     echo   Mulige aarsager:
-    echo   - Actual Budget er ikke startet (aaben appen foerst)
+    echo   - Actual Budget er ikke startet ^(aaben appen foerst^)
     echo   - Forkert URL eller password i .env
     echo   - Slet .env og koer migrate.bat igen for at rette konfigurationen
     pause
@@ -153,7 +153,7 @@ echo   Trin 5b: Importerer transaktioner (10-20 minutter)...
 echo   Luk IKKE dette vindue mens importen koerer.
 echo.
 node "%~dp0scripts\import_budget.cjs" "!CSV_FILE!"
-if %errorlevel% neq 0 (
+if !errorlevel! neq 0 (
     echo.
     echo   FEJL i import_budget. Se fejlbesked ovenfor.
     pause
