@@ -6,7 +6,8 @@
  *
  *   require('./_load-env.cjs');
  *
- * Eksisterende process.env-værdier overskrives ikke.
+ * Værdier fra .env overskriver altid arvede miljøvariabler fra forældrprocessen
+ * (fx migrate.bat) — .env-filen er den autoritative kilde.
  */
 const fs = require('fs');
 const path = require('path');
@@ -27,7 +28,7 @@ function loadEnv() {
     if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
       val = val.slice(1, -1);
     }
-    if (!(key in process.env)) process.env[key] = val;
+    process.env[key] = val;
   }
 }
 
