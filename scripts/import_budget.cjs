@@ -363,21 +363,26 @@ async function main() {
   // Auto-oprettede modtager-sider af transfers arver ikke cleared-status fra
   // import-kaldet. Vi kører derfor et ekstra pas der retter alle ucleared poster
   // — alle Spiir-transaktioner er historiske og skal være cleared.
+  // Synkroniseres i batches for at undgå PayloadTooLargeError/network-failure.
   console.log('\nMarkerer ucleared transaktioner som cleared...');
   let totalCleared = 0;
   for (const [accName, accId] of accountIdByName) {
     const transactions = await api.getTransactions(accId);
     const uncleared = transactions.filter(t => !t.cleared);
     if (uncleared.length === 0) continue;
-    for (const t of uncleared) {
-      await api.updateTransaction(t.id, { cleared: true });
+    for (let i = 0; i < uncleared.length; i += BATCH_SIZE) {
+      const batch = uncleared.slice(i, i + BATCH_SIZE);
+      for (const t of batch) {
+        await api.updateTransaction(t.id, { cleared: true });
+      }
+      try { await api.sync(); } catch (e) { console.warn(`  Sync-advarsel: ${e.message}`); }
+      process.stdout.write(`  ${accName}: ${i + batch.length}/${uncleared.length}\r`);
     }
     totalCleared += uncleared.length;
-    console.log(`  ${accName}: ${uncleared.length} poster markeret`);
+    console.log(`  ${accName}: ${uncleared.length} poster markeret              `);
   }
   if (totalCleared === 0) console.log('  Alle poster var allerede cleared.');
 
-  await api.sync();
   await api.shutdown();
   console.log('\nFærdig! Husk at sammenligne slutsaldi ovenfor med Actual Budget.');
 }
