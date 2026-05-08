@@ -3,6 +3,7 @@
 Spiir lukker den 8. juni 2026. Dette program hjælper dig med at flytte alle dine transaktioner og dit budget over i [Actual Budget](https://actualbudget.org/) — et gratis, open source alternativ.
 
 **Du beholder:**
+
 - Hele din transaktionshistorik (fra dag 1 i Spiir)
 - Alle dine kategorier
 - Dine budgetbeløb (fra Excel-eksport)
@@ -36,11 +37,11 @@ Disse løsninger giver automatisk import af nye transaktioner fra din bank. Det 
 
 ## Hvad skal du bruge?
 
-| Program | Pris | Formål |
-|---------|------|--------|
-| [Actual Budget](https://actualbudget.org/download) | Gratis | Det nye budgetprogram |
-| [Node.js LTS](https://nodejs.org/en/download) | Gratis | Kører dette migreringsscript |
-| Spiir CSV-eksport | — | Dine data fra Spiir |
+| Program                                            | Pris   | Formål                       |
+| -------------------------------------------------- | ------ | ---------------------------- |
+| [Actual Budget](https://actualbudget.org/download) | Gratis | Det nye budgetprogram        |
+| [Node.js LTS](https://nodejs.org/en/download)      | Gratis | Kører dette migreringsscript |
+| Spiir CSV-eksport                                  | —      | Dine data fra Spiir          |
 
 ---
 
@@ -67,7 +68,7 @@ Disse løsninger giver automatisk import af nye transaktioner fra din bank. Det 
 **Transaktioner (påkrævet):**
 
 3. Under **"Eksport af Poster"** → **"Avanceret eksport"**, klik **"Eksportér til CSV"**
-   - Brug *Avanceret eksport* (ikke "Simpel eksport") — den indeholder alle metadata som kategorier, kontooverførsler og noter
+   - Brug _Avanceret eksport_ (ikke "Simpel eksport") — den indeholder alle metadata som kategorier, kontooverførsler og noter
    - Sæt start/slut dato hvis du kun vil have en del af historikken, ellers hentes alt
 
 **Budget (valgfrit):**
@@ -94,19 +95,23 @@ Du behøver kun gøre dette én gang.
 ### Trin 4 — Kør migreringen
 
 **Windows:**
+
 1. Dobbeltklik på filen **`migrate.bat`** i denne mappe
 2. Følg instruktionerne i det sorte vindue der åbner sig
 
 **Mac: (IKKE TESTET)**
+
 1. Åbn Terminal (søg efter "Terminal" i Spotlight)
 2. Skriv `bash ` og træk derefter filen **`migrate.sh`** ind i Terminal-vinduet
 3. Tryk Enter og følg instruktionerne
 
 **Linux: (IKKE TESTET)**
+
 1. Åbn en terminal i denne mappe
 2. Kør: `bash migrate.sh`
 
 Programmet spørger om:
+
 - **URL til Actual Budget** — brug `http://localhost:5006` hvis du bruger Desktop App
 - **Password** — det du satte i Trin 1
 - **Stien til din Spiir CSV-fil** — fra Trin 2
@@ -125,6 +130,7 @@ node scripts/sync_budget.cjs "sti/til/Spiir Budget 2027.xlsx"
 ```
 
 **Test uden at ændre noget:**
+
 ```
 node scripts/sync_budget.cjs "Spiir Budget 2026.xlsx" --dry-run
 ```
@@ -135,14 +141,14 @@ Scriptet vil fortælle dig hvilke Excel-kategorier det ikke fandt i Actual Budge
 
 ## Hvad gør programmet?
 
-| Hvad | Detaljer |
-|------|---------|
-| Opretter kategorier | Alle dine Spiir-kategorier oprettes i Actual Budget |
-| Importerer transaktioner | Alle poster fra alle dine konti |
-| Overførsler | Interne overførsler mellem egne konti håndteres korrekt |
-| Dubletcheck | Poster markeret "Ignorer" i Spiir håndteres intelligent — Spiir havde historisk et problem med dobbeltposter, som løses ved at ignorere dubletter |
-| Idempotent | Kan køres flere gange uden at dublere data |
-| Additivt | Rører ikke eksisterende transaktioner fra andre banker — lav en backup af dit eksisterende Actual Budget inden Spiir-migrering |
+| Hvad                     | Detaljer                                                                                                                                                   |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Opretter kategorier      | Alle dine Spiir-kategorier oprettes i Actual Budget                                                                                                        |
+| Importerer transaktioner | Alle poster fra alle dine konti                                                                                                                            |
+| Overførsler              | Interne overførsler mellem egne konti håndteres korrekt                                                                                                    |
+| Dubletcheck              | Poster markeret "Ignorer" i Spiir håndteres intelligent - Spiir havde historisk et problem med dobbeltposter, som jeg håndterede ved at ignorere dubletter |
+| Idempotent               | Kan køres flere gange uden at dublere data                                                                                                                 |
+| Additivt                 | Rører ikke eksisterende transaktioner fra andre banker — lav en backup af dit eksisterende Actual Budget inden Spiir-migrering                             |
 
 ---
 
@@ -209,14 +215,15 @@ node scripts/import_budget.cjs "min-spiir-eksport.csv" --dry-run  # test
 ### Selvhostet Actual Budget server
 
 Ændre `.env` til at pege på din server:
+
 ```
-ACTUAL_SERVER_URL=https://budget.dindomaene.dk
+ACTUAL_SERVER_URL=https://budget.ditdomaene.dk
 ACTUAL_PASSWORD=dit-server-password
 ```
 
 ---
 
-*Lavet af Martin Heidemann — Spiir-bruger siden 2010. Til alle der skal finde et nyt hjem til deres økonomi.*
+_Lavet af Martin Heidemann — Spiir-bruger siden 2010. Til alle der skal finde et nyt hjem til deres økonomi._
 
 ---
 
