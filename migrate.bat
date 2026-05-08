@@ -68,6 +68,11 @@ if exist "%ENV_FILE%" (
         if /i "!line_key!"=="ACTUAL_SERVER_URL" set "ACTUAL_SERVER_URL=!line_val!"
         if /i "!line_key!"=="ACTUAL_PASSWORD" set "ACTUAL_PASSWORD=!line_val!"
     )
+    :: Strip eventuelle enkelt- eller dobbelt-anfoerselstegn fra indlaeste vaerdier
+    set "ACTUAL_SERVER_URL=!ACTUAL_SERVER_URL:'=!"
+    set "ACTUAL_SERVER_URL=!ACTUAL_SERVER_URL:"=!"
+    set "ACTUAL_PASSWORD=!ACTUAL_PASSWORD:'=!"
+    set "ACTUAL_PASSWORD=!ACTUAL_PASSWORD:"=!"
     echo   URL:      !ACTUAL_SERVER_URL!
     echo   Password: ^(skjult^)
 ) else (
@@ -87,9 +92,11 @@ if exist "%ENV_FILE%" (
         exit /b 1
     )
 
-    :: Gem til .env (fjern eventuelle anfoerselstegn fra input)
+    :: Gem til .env (fjern eventuelle enkelt- og dobbelt-anfoerselstegn fra input)
     set "CLEAN_URL=!ACTUAL_SERVER_URL:"=!"
+    set "CLEAN_URL=!CLEAN_URL:'=!"
     set "CLEAN_PASS=!ACTUAL_PASSWORD:"=!"
+    set "CLEAN_PASS=!CLEAN_PASS:'=!"
     (
         echo ACTUAL_SERVER_URL=!CLEAN_URL!
         echo ACTUAL_PASSWORD=!CLEAN_PASS!
