@@ -72,12 +72,12 @@ Du behøver kun gøre dette én gang.
 1. Dobbeltklik på filen **`migrate.bat`** i denne mappe
 2. Følg instruktionerne i det sorte vindue der åbner sig
 
-**Mac:**
+**Mac: (IKKE TESTET)**
 1. Åbn Terminal (søg efter "Terminal" i Spotlight)
 2. Skriv `bash ` og træk derefter filen **`migrate.sh`** ind i Terminal-vinduet
 3. Tryk Enter og følg instruktionerne
 
-**Linux:**
+**Linux: (IKKE TESTET)**
 1. Åbn en terminal i denne mappe
 2. Kør: `bash migrate.sh`
 
@@ -86,7 +86,7 @@ Programmet spørger om:
 - **Password** — det du satte i Trin 1
 - **Stien til din Spiir CSV-fil** — fra Trin 2
 
-Importen tager **10–20 minutter** afhængigt af din transaktionshistorik. Luk ikke vinduet imens.
+Importen tager **5–20 minutter** afhængigt af antallet af konti og størrelsen af din transaktionshistorik. Luk ikke vinduet imens.
 
 ---
 
@@ -115,9 +115,9 @@ Scriptet vil fortælle dig hvilke Excel-kategorier det ikke fandt i Actual Budge
 | Opretter kategorier | Alle dine Spiir-kategorier oprettes i Actual Budget |
 | Importerer transaktioner | Alle poster fra alle dine konti |
 | Overførsler | Interne overførsler mellem egne konti håndteres korrekt |
-| Dubletcheck | Poster markeret "Ignorer" i Spiir håndteres intelligent |
+| Dubletcheck | Poster markeret "Ignorer" i Spiir håndteres intelligent - Spiir havde historisk et problem med dobbeltposter, som jeg håndterede ved at ignorere dubletter |
 | Idempotent | Kan køres flere gange uden at dublere data |
-| Additivt | Rører ikke eksisterende transaktioner fra andre banker |
+| Additivt | Rører ikke eksisterende transaktioner fra andre banker - MEN... lav en backup af dit eksisterende Actual Budget inden spiir migrering |
 
 ---
 
@@ -184,7 +184,7 @@ node scripts/import_budget.cjs "min-spiir-eksport.csv" --dry-run  # test
 
 Ændre `.env` til at pege på din server:
 ```
-ACTUAL_SERVER_URL=https://budget.dindomaene.dk
+ACTUAL_SERVER_URL=https://budget.ditdomaene.dk
 ACTUAL_PASSWORD=dit-server-password
 ```
 
