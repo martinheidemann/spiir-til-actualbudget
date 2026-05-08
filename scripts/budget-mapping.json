@@ -1,0 +1,50 @@
+{
+  "_comment": "Mappe Excel-kolonnenavne (kolonne B) til Actual Budget-kategorinavne.",
+  "_comment2": "Rækker der mapper til SAMME Actual-kategori summeres pr. måned.",
+  "_comment3": "Slet _comment-linjerne før du bruger filen (eller lad dem stå — de ignoreres).",
+
+  "Martin": "Løn",
+  "Toni": "Løn",
+  "Martin ferietillæg": "Ferie- og fratrædelsesgodtgørelse",
+  "Toni ferietillæg": "Ferie- og fratrædelsesgodtgørelse",
+  "Børnepenge": "Børnetilskud",
+
+  "Boliglån/husleje": "Boliglån",
+  "Realkredit F-kort": "Boliglån",
+  "Banklån": "Billån",
+  "El, vand, varme & renovation": "El, vand og varme",
+  "Ejerforening": "Ejerforening",
+  "Ejendomsskat": "Ejendomsskat",
+  "Husforsikring": "Forsikring",
+  "Indbo- & familieforsikring": "Forsikring",
+
+  "Bilforsikring & autohjælp": "Bilforsikring",
+  "Ejerafgift/grøn afgift": "Biludgifter",
+  "Bilsyn": "Biludgifter",
+
+  "Institution": "Institution",
+  "Dicte fritidsklub": "Fritidsklub",
+  "Alfred ungdomsklub": "Fritidsklub",
+  "Fagforening & a-kasse": "Fagforening og a-kasse",
+  "Livs- & ulykkesforsikring": "Livsforsikring",
+  "TV & streaming": "Tv og streaming",
+  "Telefoni & internet": "Telefon og internet",
+  "Foreninger & kontingenter": "Foreninger og kontingenter",
+
+  "Studielån": "Gæld",
+  "SU - LÅN": "Gæld",
+  "Have & planter": "Have",
+  "Værksted & reservedele": "Biludgifter",
+  "Brændstof": "Benzin og diesel",
+  "Bus, tog, færge o.l.": "Offentlig transport",
+
+  "Dagligvarer": "Dagligvarer",
+  "Kantine- & frokostordning": "Kantine og frokost",
+
+  "Tøj, sko & accessories": "Tøj og sko",
+  "Sport & fritid": "Sport og fritid",
+  "Bar, cafe & restaurant": "Bar, cafe & restaurant",
+  "Møbler & boligudstyr": "Møbler og boligudstyr",
+  "Fastfood & takeaway": "Fastfood og takeaway",
+  "Elektronik & computerudstyr": "Elektronik"
+}

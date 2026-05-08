@@ -1,0 +1,10 @@
+{
+  "name": "spiir-til-actual",
+  "version": "1.0.0",
+  "description": "Migrér dine Spiir-data til Actual Budget",
+  "private": true,
+  "dependencies": {
+    "@actual-app/api": "^26.5.0",
+    "xlsx": "^0.18.5"
+  }
+}

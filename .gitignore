@@ -1,0 +1,6 @@
+# Lokale konfigurationsfiler — deles ikke
+.env
+.actual-data/
+
+# Node.js afhængigheder — installeres med npm install
+node_modules/

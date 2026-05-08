@@ -1,0 +1,371 @@
+/**
+ * import_budget.cjs
+ *
+ * Importerer Spiir-historik (alle-poster CSV) ind i en Actual Budget instans.
+ * Forudsætter at initialize_budget.cjs er kørt først.
+ *
+ * Scriptet er ADDITIVT og IDEMPOTENT:
+ *  - Opretter kun konti der ikke allerede eksisterer
+ *  - Bruger imported_id = "spiir:<Id>" så kendte transaktioner opdateres i stedet for dublikeres
+ *  - Rører ikke transaktioner fra andre banker eller manuelle posteringer
+ *
+ * Brug:
+ *   node scripts/import_budget.cjs <csv-fil>             # rigtig kørsel
+ *   node scripts/import_budget.cjs <csv-fil> --dry-run   # kun rapport, ingen import
+ *
+ * Læser ACTUAL_SERVER_URL og ACTUAL_PASSWORD fra .env i pakkens rodmappe.
+ */
+
+// --- Polyfills som @actual-app/api kræver i Node ---
+if (typeof global.navigator === 'undefined') global.navigator = { platform: '', userAgent: 'node' };
+if (typeof global.window === 'undefined') global.window = global;
+if (typeof global.location === 'undefined') global.location = { href: '', origin: '' };
+
+require('./_load-env.cjs');
+
+const api = require('@actual-app/api');
+const fs = require('fs');
+const path = require('path');
+const { readCsvAsObjects } = require('./_csv.cjs');
+
+// --- Konfiguration ---
+const SERVER_URL = process.env.ACTUAL_SERVER_URL;
+const PASSWORD = process.env.ACTUAL_PASSWORD;
+const DRY_RUN = process.argv.includes('--dry-run');
+// .actual-data placeres i pakkens rodmappe (ikke i scripts/)
+const DATA_DIR = path.join(__dirname, '..', '.actual-data');
+const BATCH_SIZE = 200;
+
+// Første ikke-flag-argument er CSV-stien
+const csvArg = process.argv.slice(2).find(a => !a.startsWith('--'));
+if (!csvArg) {
+  console.error('Brug: node scripts/import_budget.cjs <csv-fil> [--dry-run]');
+  process.exit(1);
+}
+const CSV_FILE = path.isAbsolute(csvArg) ? csvArg : path.resolve(process.cwd(), csvArg);
+if (!fs.existsSync(CSV_FILE)) {
+  console.error(`CSV-fil ikke fundet: ${CSV_FILE}`);
+  process.exit(1);
+}
+if (!SERVER_URL && !DRY_RUN) { console.error('Mangler ACTUAL_SERVER_URL i .env.'); process.exit(1); }
+if (!PASSWORD && !DRY_RUN) { console.error('Mangler ACTUAL_PASSWORD i .env.'); process.exit(1); }
+
+// --- Hjælpefunktioner: format-konvertering ---
+function parseDanishAmount(s) {
+  if (!s) return 0;
+  // "−50,40" eller "-50,40" → -50.40
+  return Number(String(s).replace(/\s/g, '').replace(',', '.')) || 0;
+}
+function toIsoDate(ddmmyyyy) {
+  // "25-11-2010" → "2010-11-25"
+  const [d, m, y] = ddmmyyyy.split('-');
+  return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+}
+// Actual API forventer beløb som heltal (øre)
+function toActualAmount(kr) {
+  return Math.round(kr * 100);
+}
+
+async function main() {
+  console.log(`=== Spiir → Actual Budget import ===`);
+  console.log(`Mode: ${DRY_RUN ? 'DRY-RUN (ingen import)' : 'LIVE (importerer)'}\n`);
+
+  // --- Indlæs CSV ---
+  console.log(`Læser ${path.basename(CSV_FILE)}...`);
+  const txs = readCsvAsObjects(CSV_FILE);
+  console.log(`  ${txs.length} transaktioner indlæst\n`);
+
+  // --- Gruppér pr. konto ---
+  const byAccount = new Map();
+  for (const t of txs) {
+    if (!byAccount.has(t.AccountName)) byAccount.set(t.AccountName, []);
+    byAccount.get(t.AccountName).push(t);
+  }
+  console.log(`Konti fundet: ${[...byAccount.keys()].join(', ')}\n`);
+
+  // --- Sortér hver konto kronologisk (ældste først) ---
+  for (const arr of byAccount.values()) {
+    arr.sort((a, b) => toIsoDate(a.Date).localeCompare(toIsoDate(b.Date)));
+  }
+
+  // --- Beregn åbningssaldo pr. konto ---
+  // Spiirs Balance er saldoen EFTER transaktionen → opening = Balance - Amount på første postering
+  const openingBalances = new Map();
+  for (const [acc, arr] of byAccount) {
+    if (arr.length === 0) continue;
+    const first = arr[0];
+    const openBal = parseDanishAmount(first.Balance) - parseDanishAmount(first.Amount);
+    openingBalances.set(acc, openBal);
+  }
+
+  // --- Beregn slutsaldo pr. konto (fra sidste postering) ---
+  const closingBalances = new Map();
+  for (const [acc, arr] of byAccount) {
+    if (arr.length === 0) continue;
+    closingBalances.set(acc, parseDanishAmount(arr[arr.length - 1].Balance));
+  }
+
+  // --- Byg lookup: Spiir Id → transaktion (til transfer-matching) ---
+  const byId = new Map();
+  for (const t of txs) byId.set(t.Id, t);
+
+  // --- Duplikat-detektion til Ignorer-poster ---
+  // I tidlige Spiir-importer kunne samme bankpostering komme med to gange,
+  // og brugeren markerede den ene som "Ignorer" manuelt. Disse skal skippes.
+  // Nøgle: konto + dato + beløb + beskrivelse → liste af tx'er
+  const dupKey = (t) => [
+    t.AccountId,
+    t.Date,
+    parseDanishAmount(t.Amount).toFixed(2),
+    (t.OriginalDescription || t.Description || '').trim(),
+  ].join('|');
+  const byDupKey = new Map();
+  for (const t of txs) {
+    const k = dupKey(t);
+    if (!byDupKey.has(k)) byDupKey.set(k, []);
+    byDupKey.get(k).push(t);
+  }
+
+  // --- Klassificér transaktioner ---
+  // For hver transfer-pair processerer vi kun ÉN side (den med negativt beløb / sender)
+  // — så Actual selv opretter modtager-siden via transfer-payee
+  const processed = new Set(); // Id'er vi har håndteret som transfer
+  const stats = {
+    regular: 0,
+    matchedTransfers: 0,
+    unmatchedTransfers: 0,
+    ignoredDuplicates: 0,
+    ignoredKept: 0,
+    udlaeg: 0,
+    splits: 0,
+  };
+  // Til API: { accountName: [transaction, ...] }
+  const toImport = new Map();
+  const transferPairs = []; // {fromAccount, toAccount, fromTx, toTx}
+
+  for (const t of txs) {
+    if (processed.has(t.Id)) continue;
+
+    const isKontooverforsel = t.CategoryName === 'Kontooverførsel';
+    const isIgnorer = t.CategoryName === 'Ignorer';
+    const isUdlaeg = t.CategoryName === 'Udlæg';
+
+    // Ignorer: spring over hvis dublet, ellers behold som "Ignoreret"-kategori
+    if (isIgnorer) {
+      const siblings = byDupKey.get(dupKey(t)) || [];
+      const hasOtherTx = siblings.some(s => s.Id !== t.Id && s.CategoryName !== 'Ignorer');
+      if (hasOtherTx) {
+        stats.ignoredDuplicates++;
+        continue;
+      }
+      // Behold som regulær med kategori "Ignoreret"
+      stats.ignoredKept++;
+      stats.regular++;
+      t.__targetCategory = 'Ignoreret';
+      if (!toImport.has(t.AccountName)) toImport.set(t.AccountName, []);
+      toImport.get(t.AccountName).push(t);
+      continue;
+    }
+
+    // Kontooverørsel: forsøg at matche par
+    if (isKontooverforsel) {
+      const counter = t.CounterEntryId && byId.get(t.CounterEntryId);
+      if (counter && !processed.has(counter.Id)) {
+        // Vi har begge sider → behandl som transfer
+        const amtT = parseDanishAmount(t.Amount);
+        const amtC = parseDanishAmount(counter.Amount);
+        // Kun hvis de er ~modsatte
+        if (Math.abs(amtT + amtC) < 0.01) {
+          const fromTx = amtT < 0 ? t : counter;
+          const toTx = amtT < 0 ? counter : t;
+          transferPairs.push({ fromTx, toTx });
+          processed.add(t.Id);
+          processed.add(counter.Id);
+          stats.matchedTransfers++;
+          continue;
+        }
+      }
+      // Ingen match → ekstern overførsel, spring over
+      stats.unmatchedTransfers++;
+      continue;
+    }
+
+    // Udlæg: regulære transaktioner med dedikeret kategori "Udlæg"
+    if (isUdlaeg) {
+      stats.udlaeg++;
+      t.__targetCategory = 'Udlæg';
+    }
+    if (t.SplitGroupId) stats.splits++;
+    stats.regular++;
+
+    if (!toImport.has(t.AccountName)) toImport.set(t.AccountName, []);
+    toImport.get(t.AccountName).push(t);
+  }
+
+  console.log(`Klassificering:`);
+  console.log(`  Regulære transaktioner:    ${stats.regular}`);
+  console.log(`     heraf udlæg:             ${stats.udlaeg}`);
+  console.log(`     heraf split-poster:      ${stats.splits}`);
+  console.log(`     heraf bevarede Ignorer:  ${stats.ignoredKept}`);
+  console.log(`  Matchede overførsler (par): ${stats.matchedTransfers}`);
+  console.log(`  Ikke-matchede overf.:       ${stats.unmatchedTransfers} (sprunget over)`);
+  console.log(`  Ignorer-dubletter:          ${stats.ignoredDuplicates} (sprunget over)\n`);
+
+  console.log(`Åbningssaldi (1. postering i Spiir):`);
+  for (const [acc, bal] of openingBalances) console.log(`  ${acc.padEnd(20)} ${bal.toFixed(2).padStart(12)} kr`);
+  console.log(`\nSlutsaldi (sidste postering i Spiir):`);
+  for (const [acc, bal] of closingBalances) console.log(`  ${acc.padEnd(20)} ${bal.toFixed(2).padStart(12)} kr`);
+  console.log();
+
+  if (DRY_RUN) {
+    console.log('DRY-RUN — afslutter uden at importere.\n');
+    return;
+  }
+
+  // --- Forbind til Actual Budget ---
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  console.log('Forbinder til Actual Budget...');
+  await api.init({ dataDir: DATA_DIR, serverURL: SERVER_URL, password: PASSWORD });
+
+  const budgets = await api.getBudgets();
+  if (budgets.length === 0) throw new Error('Ingen budgetter på serveren');
+  const budget = budgets[0];
+  console.log(`Henter budget: ${budget.name}\n`);
+  await api.downloadBudget(budget.groupId);
+
+  // --- Opret/find konti ---
+  console.log('Opretter konti (hvis ikke eksisterer)...');
+  const existingAccounts = await api.getAccounts();
+  const accountIdByName = new Map();
+  for (const acc of existingAccounts) accountIdByName.set(acc.name, acc.id);
+
+  for (const [accName, openBal] of openingBalances) {
+    if (accountIdByName.has(accName)) {
+      console.log(`  Findes: ${accName}`);
+      continue;
+    }
+    const id = await api.createAccount({ name: accName, type: 'checking' }, toActualAmount(openBal));
+    accountIdByName.set(accName, id);
+    console.log(`  Oprettet: ${accName} (åbn.saldo ${openBal.toFixed(2)} kr)`);
+  }
+  console.log();
+
+  // --- Build kategori-lookup (CategoryName → category id) ---
+  let groups = await api.getCategoryGroups();
+  const categoryIdByName = new Map();
+  const rebuildCategoryMap = () => {
+    categoryIdByName.clear();
+    for (const g of groups) {
+      for (const c of (g.categories || [])) {
+        categoryIdByName.set(c.name.toLowerCase(), c.id);
+      }
+    }
+  };
+  rebuildCategoryMap();
+
+  // Sikr at "Ignoreret" og "Udlæg" kategorier findes under Diverse
+  let needsRebuild = false;
+  for (const extra of ['Ignoreret', 'Udlæg']) {
+    if (categoryIdByName.has(extra.toLowerCase())) continue;
+    let diverseGroup = groups.find(g => g.name.toLowerCase() === 'diverse');
+    let diverseGroupId = diverseGroup?.id;
+    if (!diverseGroupId) {
+      diverseGroupId = await api.createCategoryGroup({ name: 'Diverse', is_income: false });
+      console.log('  Oprettet gruppe: Diverse');
+      groups = await api.getCategoryGroups();
+    }
+    await api.createCategory({ name: extra, group_id: diverseGroupId, is_income: false });
+    console.log(`  Oprettet kategori: ${extra} (under Diverse)`);
+    needsRebuild = true;
+  }
+  if (needsRebuild) {
+    groups = await api.getCategoryGroups();
+    rebuildCategoryMap();
+  }
+
+  // --- Build transfer-payee lookup (account id → transfer payee id) ---
+  const allPayees = await api.getPayees();
+  const transferPayeeByAccountId = new Map();
+  for (const p of allPayees) {
+    if (p.transfer_acct) transferPayeeByAccountId.set(p.transfer_acct, p.id);
+  }
+
+  // --- Konstruer transaktioner pr. konto ---
+  const apiTxByAccount = new Map();
+  function pushTx(accName, tx) {
+    if (!apiTxByAccount.has(accName)) apiTxByAccount.set(accName, []);
+    apiTxByAccount.get(accName).push(tx);
+  }
+
+  // Regulære
+  for (const [accName, list] of toImport) {
+    for (const t of list) {
+      const catName = t.__targetCategory || t.CategoryName || '';
+      const catId = categoryIdByName.get(catName.toLowerCase());
+      // Tags droppes — Comment indeholder allerede #tag-versionen som Actual renderer korrekt
+      const notes = [t.OriginalDescription, t.Comment].filter(Boolean).join(' | ');
+      pushTx(accName, {
+        date: toIsoDate(t.Date),
+        amount: toActualAmount(parseDanishAmount(t.Amount)),
+        payee_name: (t.Description || '').trim() || null,
+        notes: notes || null,
+        category: catId || null,
+        imported_id: `spiir:${t.Id}`,
+        cleared: true,
+      });
+    }
+  }
+
+  // Transfers (kun fra-siden — Actual auto-opretter modtager-siden via transfer payee)
+  for (const { fromTx, toTx } of transferPairs) {
+    const fromAccId = accountIdByName.get(fromTx.AccountName);
+    const toAccId = accountIdByName.get(toTx.AccountName);
+    if (!fromAccId || !toAccId) continue;
+    const transferPayeeId = transferPayeeByAccountId.get(toAccId);
+    if (!transferPayeeId) {
+      console.warn(`Ingen transfer-payee for ${toTx.AccountName} — springer over`);
+      continue;
+    }
+    const notes = [fromTx.OriginalDescription, fromTx.Comment].filter(Boolean).join(' | ');
+    pushTx(fromTx.AccountName, {
+      date: toIsoDate(fromTx.Date),
+      amount: toActualAmount(parseDanishAmount(fromTx.Amount)),
+      payee: transferPayeeId,
+      notes: notes || null,
+      imported_id: `spiir-tx:${fromTx.Id}-${toTx.Id}`,
+      cleared: true,
+    });
+  }
+
+  // --- Importér i batches ---
+  // Sync efter hver batch for at undgå at akkumulere så mange ændringer at
+  // serverens body-size limit sprænges (PayloadTooLargeError).
+  console.log('Importerer transaktioner...');
+  for (const [accName, list] of apiTxByAccount) {
+    const accId = accountIdByName.get(accName);
+    let added = 0, updated = 0;
+    // Sortér kronologisk
+    list.sort((a, b) => a.date.localeCompare(b.date));
+    for (let i = 0; i < list.length; i += BATCH_SIZE) {
+      const batch = list.slice(i, i + BATCH_SIZE);
+      const result = await api.importTransactions(accId, batch);
+      added += result.added?.length || 0;
+      updated += result.updated?.length || 0;
+      // Tving sync til serveren mellem hver batch
+      try { await api.sync(); }
+      catch (e) { console.warn(`\n  Sync-advarsel: ${e.message}`); }
+      process.stdout.write(`  ${accName}: ${i + batch.length}/${list.length}\r`);
+    }
+    console.log(`  ${accName}: ${list.length} behandlet (tilføjet: ${added}, opdateret: ${updated})`);
+  }
+
+  await api.shutdown();
+  console.log('\nFærdig! Husk at sammenligne slutsaldi ovenfor med Actual Budget.');
+}
+
+main().catch(async err => {
+  console.error('\nFejl:', err.message);
+  console.error(err.stack);
+  try { await api.shutdown(); } catch {}
+  process.exit(1);
+});
