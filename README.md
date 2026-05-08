@@ -9,6 +9,31 @@ Spiir lukker den 8. juni 2026. Dette program hjælper dig med at flytte alle din
 
 ---
 
+## Om dette projekt
+
+Jeg hedder Martin, er 46 år og arbejder som udvikler ved JP/Politikens Hus. Jeg har brugt Spiir siden 2010 og er rigtig glad for det overblik det har givet mig over min økonomi gennem årene.
+
+Da Spiir annoncerede lukning begyndte jeg at kigge efter alternativer og faldt over [Actual Budget](https://actualbudget.org/) — et open source projekt der ser rigtig fornuftigt ud. Jeg kører selv Actual Budget **self-hosted** på en hjemmeserver, men der er mange muligheder:
+
+- **Lokalt** — installer Desktop App på din computer, ingen server nødvendig
+- **Self-hosted** — kør det på din egen server (Docker, LXC m.m.)
+- **Hosted** — betal for en managed løsning hos fx [PikaPods](https://www.pikapods.com/)
+
+Jeg har skiftet Actual Budget til at køre **transaktionelt** i stedet for envelope-baseret — det gøres under Indstillinger i Actual Budget og passer bedre til den måde jeg tænker økonomi på.
+
+Jeg håber disse scripts kan hjælpe andre Spiir-brugere godt på vej til et fortsat godt økonomisk overblik.
+
+### Automatisk bankintegration
+
+Jeg er ikke selv kommet dertil endnu, men det er muligt at forbinde Actual Budget direkte til din bank via:
+
+- **[Lunchflow](https://www.lunchflow.app/coverage)** — tjek om din bank er understøttet
+- **[EnableBanking](https://enablebanking.com/)** — europæisk løsning
+
+Disse løsninger giver automatisk import af nye transaktioner fra din bank. Det må I selv researche — opsætning af konti og bankintegration er ikke dækket af dette projekt.
+
+---
+
 ## Hvad skal du bruge?
 
 | Program | Pris | Formål |
@@ -72,12 +97,12 @@ Du behøver kun gøre dette én gang.
 1. Dobbeltklik på filen **`migrate.bat`** i denne mappe
 2. Følg instruktionerne i det sorte vindue der åbner sig
 
-**Mac:**
+**Mac: (IKKE TESTET)**
 1. Åbn Terminal (søg efter "Terminal" i Spotlight)
 2. Skriv `bash ` og træk derefter filen **`migrate.sh`** ind i Terminal-vinduet
 3. Tryk Enter og følg instruktionerne
 
-**Linux:**
+**Linux: (IKKE TESTET)**
 1. Åbn en terminal i denne mappe
 2. Kør: `bash migrate.sh`
 
@@ -86,7 +111,7 @@ Programmet spørger om:
 - **Password** — det du satte i Trin 1
 - **Stien til din Spiir CSV-fil** — fra Trin 2
 
-Importen tager **10–20 minutter** afhængigt af din transaktionshistorik. Luk ikke vinduet imens.
+Importen tager **5–20 minutter** afhængigt af antallet af konti og størrelsen af din transaktionshistorik. Luk ikke vinduet imens.
 
 ---
 
@@ -104,7 +129,7 @@ node scripts/sync_budget.cjs "sti/til/Spiir Budget 2027.xlsx"
 node scripts/sync_budget.cjs "Spiir Budget 2026.xlsx" --dry-run
 ```
 
-Scriptet vil fortælle dig hvilke Excel-kategorier det ikke fandt i Actual Budget. Du kan tilføje en mapping i `scripts/budget-mapping.json` — se eksempler i filen.
+Scriptet vil fortælle dig hvilke Excel-kategorier det ikke fandt i Actual Budget.
 
 ---
 
@@ -115,9 +140,9 @@ Scriptet vil fortælle dig hvilke Excel-kategorier det ikke fandt i Actual Budge
 | Opretter kategorier | Alle dine Spiir-kategorier oprettes i Actual Budget |
 | Importerer transaktioner | Alle poster fra alle dine konti |
 | Overførsler | Interne overførsler mellem egne konti håndteres korrekt |
-| Dubletcheck | Poster markeret "Ignorer" i Spiir håndteres intelligent |
+| Dubletcheck | Poster markeret "Ignorer" i Spiir håndteres intelligent — Spiir havde historisk et problem med dobbeltposter, som løses ved at ignorere dubletter |
 | Idempotent | Kan køres flere gange uden at dublere data |
-| Additivt | Rører ikke eksisterende transaktioner fra andre banker |
+| Additivt | Rører ikke eksisterende transaktioner fra andre banker — lav en backup af dit eksisterende Actual Budget inden Spiir-migrering |
 
 ---
 
@@ -126,6 +151,8 @@ Scriptet vil fortælle dig hvilke Excel-kategorier det ikke fandt i Actual Budge
 Ja. Programmet er designet til at være **additivt** — det sletter aldrig noget eksisterende. Du kan trygt køre det på et budget der allerede har data fra en anden bank.
 
 Alle Spiir-transaktioner får et unikt ID (`spiir:<id>`) så de ikke dublikeres hvis du kører importen igen.
+
+> **Tip:** Lav en backup af dit Actual Budget inden du kører migreringen — enten via Actual Budgets egen export-funktion eller ved at kopiere data-mappen.
 
 ---
 
@@ -141,8 +168,7 @@ spiir-til-actual/
 └── scripts/
     ├── initialize_budget.cjs  ← Opretter kategorier i Actual Budget
     ├── import_budget.cjs      ← Importerer transaktioner
-    ├── sync_budget.cjs        ← Importerer Excel-budgetbeløb
-    └── budget-mapping.json    ← Oversætter Excel-navne til Actual-navne
+    └── sync_budget.cjs        ← Importerer Excel-budgetbeløb
 ```
 
 ---
@@ -165,7 +191,7 @@ Scriptet er idempotent — du kan bare køre det igen. Det vil fortsætte fra de
 Budgettet kan være kommet i en korrupt tilstand. Slet det i Actual Budget UI og opret et nyt tomt budget, og kør migreringen igen.
 
 **Kategorier fra Excel matcher ikke**
-Kør `sync_budget.cjs --dry-run` for at se hvilke navne der ikke matchede. Tilføj derefter en mapping i `scripts/budget-mapping.json`.
+Kør `sync_budget.cjs --dry-run` for at se hvilke navne der ikke matchede. Tjek at kategorien findes i Actual Budget under præcis det navn Excel bruger.
 
 ---
 
@@ -190,4 +216,12 @@ ACTUAL_PASSWORD=dit-server-password
 
 ---
 
-*Lavet til brug for alle Spiir-brugere der skal finde et nyt hjem til deres økonomi.*
+*Lavet af Martin Heidemann — Spiir-bruger siden 2010. Til alle der skal finde et nyt hjem til deres økonomi.*
+
+---
+
+## Om koden
+
+Scriptsene i dette projekt er i stor stil bygget ved hjælp af [Claude Code](https://claude.ai/download) — Anthropics AI-kodningsassistent. Claude Code har hjulpet med alt fra den indledende arkitektur og Excel-parsing til fejlretning og iterativ forfining af logikken.
+
+Har du selv lyst til at tilpasse eller udvide scriptsene, kan Claude Code være en god hjælp — også selvom du ikke er udvikler til daglig.

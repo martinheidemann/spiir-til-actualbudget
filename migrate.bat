@@ -162,13 +162,48 @@ if %errorlevel% neq 0 (
 
 echo.
 echo ====================================================
+echo   Transaktioner importeret!
+echo ====================================================
+echo.
+
+:: --------------------------------------------------------
+:: Trin 6 (valgfrit): Excel-budgetimport
+:: --------------------------------------------------------
+echo [Trin 6/6] Excel-budget (valgfrit)...
+echo.
+echo   Har du downloadet dine budgetfiler fra Spiir?
+echo   (Spiir.dk ^> Eksporter ^> Eksporter budget for 2026/2027)
+echo.
+set /p "XLSX_2026=  Sti til 'Spiir Budget 2026.xlsx' (Enter = spring over): "
+set "XLSX_2026=!XLSX_2026:"=!"
+
+if not "!XLSX_2026!"=="" (
+    if exist "!XLSX_2026!" (
+        echo   Importerer budget for 2026...
+        node "%~dp0scripts\sync_budget.cjs" "!XLSX_2026!"
+    ) else (
+        echo   Filen blev ikke fundet: !XLSX_2026!
+    )
+)
+
+set /p "XLSX_2027=  Sti til 'Spiir Budget 2027.xlsx' (Enter = spring over): "
+set "XLSX_2027=!XLSX_2027:"=!"
+
+if not "!XLSX_2027!"=="" (
+    if exist "!XLSX_2027!" (
+        echo   Importerer budget for 2027...
+        node "%~dp0scripts\sync_budget.cjs" "!XLSX_2027!"
+    ) else (
+        echo   Filen blev ikke fundet: !XLSX_2027!
+    )
+)
+
+echo.
+echo ====================================================
 echo   Migration gennemfoert!
 echo.
-echo   Aaben Actual Budget og tjek at transaktionerne
-echo   er der og at saldiene stemmer.
-echo.
-echo   Vil du ogsaa importere dit Excel-budget?
-echo   Koer: node scripts\sync_budget.cjs "Spiir Budget 2026.xlsx"
+echo   Aaben Actual Budget og verificer at transaktioner
+echo   og saldi stemmer.
 echo ====================================================
 echo.
 pause

@@ -5,15 +5,18 @@
  * Scriptet er ADDITIVT og IDEMPOTENT — kørsel sætter/overskriver kun de
  * måneds-/kategori-kombinationer der er nævnt i Excel-filen.
  *
- * Excel-format (Spiir Budget 2026/2027.xlsx):
- *   Kolonne A: Sektionsoverskrift
- *   Kolonne B: Kategorinavn (fx "Dagligvarer", "Martin", "Bar, cafe & restaurant")
- *   Kolonne C: Gns/md (formel — ignoreres)
- *   Kolonne D: Årligt (formel — ignoreres)
- *   Kolonne E-P: Budgetbeløb for Jan–Dec
+ * Excel-struktur (Spiir Budget 2026/2027.xlsx):
+ *   Øverst: et opsummerings-blok med totaler (ignoreres).
+ *   Derefter tre sektioner adskilt af "divider-rækker" (kolonne A = sektionsnavn,
+ *   måneds-kolonner indeholder etiketter "Jan"–"Dec" i stedet for tal):
  *
- * Kategorinavne i Excel der afviger fra Actual Budget-navne kan mappes i
- * budget-mapping.json. Rækker der mapper til samme kategori summeres pr. måned.
+ *   Indkomst / Regninger-sektioner:
+ *     Kolonne A = kategorinavn, kolonne B = brugernoter (ignoreres).
+ *     Rækker med tom kolonne A summeres ind i den foregående kolonne-A-kategori.
+ *
+ *   Forbrug-sektion:
+ *     Kolonne A = under-sektionsnavn (ignoreres), kolonne B = kategorinavn.
+ *     Rækker med tom kolonne A bruger kolonne B som kategorinavn.
  *
  * Brug:
  *   node scripts/sync_budget.cjs <excel-fil>             # rigtig kørsel
@@ -38,7 +41,6 @@ const SERVER_URL = process.env.ACTUAL_SERVER_URL;
 const PASSWORD = process.env.ACTUAL_PASSWORD;
 const DRY_RUN = process.argv.includes('--dry-run');
 const DATA_DIR = path.join(__dirname, '..', '.actual-data');
-const MAPPING_FILE = path.join(__dirname, 'budget-mapping.json');
 
 // Første ikke-flag-argument er Excel-stien
 const xlsxArg = process.argv.slice(2).find(a => !a.startsWith('--'));
@@ -51,91 +53,142 @@ if (!fs.existsSync(XLSX_FILE)) {
   console.error(`Excel-fil ikke fundet: ${XLSX_FILE}`);
   process.exit(1);
 }
-if (!SERVER_URL && !DRY_RUN) { console.error('Mangler ACTUAL_SERVER_URL i .env.'); process.exit(1); }
-if (!PASSWORD && !DRY_RUN) { console.error('Mangler ACTUAL_PASSWORD i .env.'); process.exit(1); }
+if (!SERVER_URL) { console.error('Mangler ACTUAL_SERVER_URL i .env.'); process.exit(1); }
+if (!PASSWORD) { console.error('Mangler ACTUAL_PASSWORD i .env.'); process.exit(1); }
 
-// Månedsnavne som de optræder i Excel (dansk Spiir-eksport)
+// Månedsnavne (dansk og engelsk for robusthed)
 const MONTH_NAMES = ['jan', 'feb', 'mar', 'apr', 'maj', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
-// Alternativt engelske navne for robusthed
 const MONTH_NAMES_EN = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
 // Rækker der er totaler/overskrifter og skal springes over
-const SKIP_PATTERNS = [
-  /ialt/i,
-  /total/i,
-  /forbrug/i,   // "Forbrug ialt"
-  /indkomst ialt/i,
-  /^gns/i,
-  /^årligt/i,
-];
-
+const SKIP_PATTERNS = [/ialt/i, /total/i, /^gns/i, /^årligt/i, /forbrugsloft/i];
 function isSkipRow(name) {
-  if (!name || !name.trim()) return true;
-  return SKIP_PATTERNS.some(p => p.test(name.trim()));
+  if (!name || !String(name).trim()) return true;
+  return SKIP_PATTERNS.some(p => p.test(String(name).trim()));
+}
+
+function parseAmount(raw) {
+  if (raw == null || raw === '') return null;
+  if (typeof raw === 'number') return raw;
+  // Dansk format: "8.000,50" → 8000.50
+  const cleaned = String(raw).replace(/\./g, '').replace(',', '.');
+  const n = parseFloat(cleaned);
+  return isNaN(n) ? null : n;
 }
 
 /**
- * Parser Excel-filen og returnerer en liste af:
- *   { categoryName, monthIndex (0-11), amountDKK }
+ * Returnerer true hvis rækkens måneds-kolonner indeholder måneds-navne som strenge
+ * (fx "Jan", "Feb") i stedet for tal. Bruges til at detektere sektion-genstart-rækker.
+ */
+function isMonthLabelRow(row, monthColIndices) {
+  let labelCount = 0;
+  for (const { colIdx } of monthColIndices) {
+    const val = String(row[colIdx] || '').toLowerCase().trim();
+    if (MONTH_NAMES.indexOf(val) >= 0 || MONTH_NAMES_EN.indexOf(val) >= 0) labelCount++;
+  }
+  return labelCount >= 6;
+}
+
+/**
+ * Parser Excel og returnerer liste af { categoryName, monthIndex (0-11), amountDKK }.
+ *
+ * Excel-struktur har to typer sektioner:
+ *   - Indkomst / Regninger: Kolonne A = kategorinavn, kolonne B = brugernoter (ignoreres)
+ *   - Forbrug: Kolonne A = under-sektionsnavn (ignoreres), kolonne B = kategorinavn
+ *
+ * Sektioner markeres af rækker hvor kolonne A har et navn OG måneds-kolonnerne
+ * indeholder måneds-etiketter ("Jan", "Feb" …) i stedet for tal.
+ * Disse rækker springer vi over — de er kun dividers.
+ *
+ * Øverst i arket er der et opsummerings-blok (Indkomst, Regninger, Forbrug totaler)
+ * som vi springer over ved hjælp af inDataSection-flaget.
  */
 function parseExcel(filePath) {
   const wb = XLSX.readFile(filePath);
-  const sheetName = wb.SheetNames[0];
-  const ws = wb.Sheets[sheetName];
-  // raw: true returnerer numeriske celleværdier som JavaScript-tal (undgår danske
-  // tusindtals-separator-problemer, hvor "8.000" ellers fejltolkes som 8,0 i stedet for 8000).
+  const ws = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: true });
 
-  // Find rækken der indeholder måneds-overskrifter (E-P kolonner)
+  // Find header-rækken med Jan-Dec
   let headerRowIdx = -1;
-  let monthColIndices = []; // array of { monthIndex (0-11), colIdx }
-
+  let monthColIndices = []; // [{ monthIndex, colIdx }]
   for (let r = 0; r < rows.length; r++) {
-    const row = rows[r];
-    const monthHits = [];
-    for (let c = 0; c < row.length; c++) {
-      const cell = String(row[c] || '').toLowerCase().trim();
-      const mIdx = MONTH_NAMES.indexOf(cell);
-      const mIdxEn = MONTH_NAMES_EN.indexOf(cell);
-      const found = mIdx >= 0 ? mIdx : mIdxEn >= 0 ? mIdxEn : -1;
-      if (found >= 0) monthHits.push({ monthIndex: found, colIdx: c });
+    const hits = [];
+    for (let c = 0; c < rows[r].length; c++) {
+      const cell = String(rows[r][c] || '').toLowerCase().trim();
+      const mDa = MONTH_NAMES.indexOf(cell);
+      const mEn = MONTH_NAMES_EN.indexOf(cell);
+      const found = mDa >= 0 ? mDa : mEn >= 0 ? mEn : -1;
+      if (found >= 0) hits.push({ monthIndex: found, colIdx: c });
     }
-    if (monthHits.length >= 6) { // mindst 6 måneder for at identificere header-rækken
-      headerRowIdx = r;
-      monthColIndices = monthHits;
-      break;
-    }
+    if (hits.length >= 6) { headerRowIdx = r; monthColIndices = hits; break; }
   }
-
-  if (headerRowIdx < 0) {
-    throw new Error('Kunne ikke finde måneds-overskrifter i Excel-filen. Forventede Jan-Dec i en række.');
-  }
+  if (headerRowIdx < 0) throw new Error('Kunne ikke finde måneds-overskrifter i Excel-filen.');
   console.log(`  Header-række fundet på linje ${headerRowIdx + 1}: ${monthColIndices.length} måneder identificeret`);
 
-  // Kolonne B er index 1 (0-baseret)
-  const CAT_COL = 1;
-
   const entries = [];
+
+  // Tilstand under scanning
+  let inDataSection = false;   // false indtil første sektion-genstart-række ses
+  let inForbrug = false;       // true inde i "Forbrug"-sektionen (bruger kolonne B som kategori)
+  let currentGroupCat = null;  // Den aktuelle kolonne-A-kategori vi summerer ind i
+  let groupUsesColA = false;   // true = tomme-A sub-rækker summeres i col A-kategori
+
   for (let r = headerRowIdx + 1; r < rows.length; r++) {
     const row = rows[r];
-    const rawName = row[CAT_COL];
-    const catName = rawName ? String(rawName).trim() : '';
-    if (isSkipRow(catName)) continue;
+    const rawA = row[0] != null ? String(row[0]).trim() : '';
+    const rawB = row[1] != null ? String(row[1]).trim() : '';
 
+    if (isSkipRow(rawA) && isSkipRow(rawB)) continue;
+
+    // Detekter sektion-genstart-rækker: kolonne A har navn OG måneds-kolonner har måneds-etiketter.
+    // Eksempel: "Indkomst" (Jan Feb … Dec), "Regninger" (Jan Feb … Dec), "Forbrug" (Jan Feb … Dec).
+    // Disse rækker er kun dividers — vi springer dem over men opdaterer tilstand.
+    if (rawA && !isSkipRow(rawA) && isMonthLabelRow(row, monthColIndices)) {
+      inDataSection = true;
+      currentGroupCat = rawA;
+      groupUsesColA = false;
+      inForbrug = rawA.toLowerCase() === 'forbrug';
+      continue;
+    }
+
+    // Spring summarieringsrækker over der optræder inden første sektions-divider
+    if (!inDataSection) continue;
+
+    // Træk beløb ud for alle måneds-kolonner
+    const monthAmounts = [];
     for (const { monthIndex, colIdx } of monthColIndices) {
-      const raw = row[colIdx];
-      if (raw === null || raw === undefined || raw === '') continue;
-      // Med raw:true er numeriske celler allerede tal; fallback til string-parsing
-      let amount;
-      if (typeof raw === 'number') {
-        amount = raw;
+      const amt = parseAmount(row[colIdx]);
+      if (amt != null && amt !== 0) monthAmounts.push({ monthIndex, amountDKK: amt });
+    }
+    const hasAmounts = monthAmounts.length > 0;
+
+    if (rawA && !isSkipRow(rawA)) {
+      currentGroupCat = rawA;
+      if (hasAmounts) {
+        if (inForbrug && rawB && !isSkipRow(rawB)) {
+          // Forbrug-sektion: kolonne A er under-sektionsnavn, kolonne B er den egentlige kategori
+          for (const m of monthAmounts) entries.push({ categoryName: rawB, ...m });
+          // groupUsesColA forbliver false — efterfølgende tomme-A rækker bruger col B
+        } else {
+          // Indkomst / Regninger: kolonne A er kategorien
+          groupUsesColA = true;
+          for (const m of monthAmounts) entries.push({ categoryName: rawA, ...m });
+        }
       } else {
-        // Håndter dansk format: "8.000,50" → 8000.50
-        const cleaned = String(raw).replace(/\./g, '').replace(',', '.');
-        amount = parseFloat(cleaned);
+        // Ingen beløb → under-sektionsoverskrift (fx "Bolig" inden i Regninger)
+        groupUsesColA = false;
       }
-      if (isNaN(amount)) continue;
-      entries.push({ categoryName: catName, monthIndex, amountDKK: amount });
+    } else if (!rawA && rawB && !isSkipRow(rawB)) {
+      if (inForbrug) {
+        // Forbrug-sektion: kolonne B er kategorien
+        for (const m of monthAmounts) entries.push({ categoryName: rawB, ...m });
+      } else {
+        // Uden for Forbrug: summér ind i kolonne-A-gruppe
+        const catName = groupUsesColA ? currentGroupCat : rawB;
+        if (catName) {
+          for (const m of monthAmounts) entries.push({ categoryName: catName, ...m });
+        }
+      }
     }
   }
 
@@ -144,21 +197,17 @@ function parseExcel(filePath) {
 
 /**
  * Udled årstal fra filnavn (fx "Spiir Budget 2026.xlsx" → 2026).
- * Fallback: indeværende år.
  */
 function yearFromFilename(filePath) {
   const m = path.basename(filePath).match(/\b(20\d{2})\b/);
   return m ? parseInt(m[1], 10) : new Date().getFullYear();
 }
 
-/**
- * Actual Budget month string: "2026-01" (altid den 1. i måneden, nul-padded).
- */
+/** Actual Budget month string: "2026-01" */
 function toActualMonth(year, monthIndex) {
   return `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
 }
 
-// Actual API forventer beløb som heltal (øre)
 function toActualAmount(dkk) {
   return Math.round(dkk * 100);
 }
@@ -168,15 +217,6 @@ async function main() {
   console.log(`Fil:  ${path.basename(XLSX_FILE)}`);
   console.log(`Mode: ${DRY_RUN ? 'DRY-RUN (ingen ændringer)' : 'LIVE (opdaterer)'}\n`);
 
-  // --- Indlæs kategori-mapping ---
-  let mapping = {};
-  if (fs.existsSync(MAPPING_FILE)) {
-    mapping = JSON.parse(fs.readFileSync(MAPPING_FILE, 'utf-8'));
-    console.log(`Kategori-mapping indlæst: ${Object.keys(mapping).length} aliaser\n`);
-  } else {
-    console.log(`Ingen budget-mapping.json fundet — bruger Excel-navne direkte\n`);
-  }
-
   // --- Parser Excel ---
   console.log(`Læser Excel-fil...`);
   const entries = parseExcel(XLSX_FILE);
@@ -185,24 +225,11 @@ async function main() {
   const year = yearFromFilename(XLSX_FILE);
   console.log(`Årstal detekteret: ${year}\n`);
 
-  // Anvend mapping og summér beløb pr. (actualCategory, month)
-  // Map: "actualCatName|monthKey" → sumDKK
-  const budgetMap = new Map();
+  // Summér beløb pr. (kategori, måned)
+  const budgetMap = new Map(); // "catName|||month" → sumDKK
   for (const { categoryName, monthIndex, amountDKK } of entries) {
-    const actualName = mapping[categoryName] || categoryName;
-    const key = `${actualName}|||${toActualMonth(year, monthIndex)}`;
+    const key = `${categoryName}|||${toActualMonth(year, monthIndex)}`;
     budgetMap.set(key, (budgetMap.get(key) || 0) + amountDKK);
-  }
-
-  if (DRY_RUN) {
-    console.log('--- DRY-RUN rapport ---');
-    console.log('Følgende budgetbeløb ville blive sat:\n');
-    for (const [key, dkk] of [...budgetMap].sort()) {
-      const [catName, month] = key.split('|||');
-      console.log(`  ${month}  ${catName.padEnd(40)} ${dkk.toFixed(2).padStart(10)} kr`);
-    }
-    console.log(`\nI alt: ${budgetMap.size} poster`);
-    return;
   }
 
   // --- Forbind til Actual Budget ---
@@ -225,6 +252,25 @@ async function main() {
     }
   }
 
+  if (DRY_RUN) {
+    console.log('--- DRY-RUN rapport ---');
+    console.log('Følgende budgetbeløb ville blive sat:\n');
+    const notFound = new Set();
+    for (const [key, dkk] of [...budgetMap].sort()) {
+      const [catName, month] = key.split('|||');
+      const found = categoryIdByName.has(catName.toLowerCase());
+      if (!found) { notFound.add(catName); continue; }
+      console.log(`  ${month}  ${catName.padEnd(40)} ${dkk.toFixed(2).padStart(10)} kr`);
+    }
+    console.log(`\nI alt: ${budgetMap.size - notFound.size} poster ville blive sat`);
+    if (notFound.size > 0) {
+      console.log(`\nKategorier der IKKE findes i Actual Budget (tilføj til budget-mapping.json):`);
+      for (const n of [...notFound].sort()) console.log(`  "${n}"`);
+    }
+    await api.shutdown();
+    return;
+  }
+
   // --- Sæt budgetbeløb ---
   let set = 0, skipped = 0;
   const notFound = new Set();
@@ -233,11 +279,7 @@ async function main() {
   for (const [key, dkk] of budgetMap) {
     const [catName, month] = key.split('|||');
     const catId = categoryIdByName.get(catName.toLowerCase());
-    if (!catId) {
-      notFound.add(catName);
-      skipped++;
-      continue;
-    }
+    if (!catId) { notFound.add(catName); skipped++; continue; }
     await api.setBudgetAmount(month, catId, toActualAmount(dkk));
     set++;
   }

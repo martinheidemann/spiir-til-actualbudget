@@ -148,12 +148,48 @@ fi
 
 echo ""
 echo "===================================================="
+echo "  Transaktioner importeret!"
+echo "===================================================="
+echo ""
+
+# --------------------------------------------------------
+# Trin 6 (valgfrit): Excel-budgetimport
+# --------------------------------------------------------
+echo "[Trin 6/6] Excel-budget (valgfrit)..."
+echo ""
+echo "  Har du downloadet dine budgetfiler fra Spiir?"
+echo "  (spiir.dk → Eksporter → Eksporter budget for 2026/2027)"
+echo ""
+
+read -r -p "  Sti til 'Spiir Budget 2026.xlsx' (Enter = spring over): " XLSX_2026
+XLSX_2026="${XLSX_2026//\"/}"
+XLSX_2026="$(echo "$XLSX_2026" | xargs)"
+if [ -n "$XLSX_2026" ]; then
+    if [ -f "$XLSX_2026" ]; then
+        echo "  Importerer budget for 2026..."
+        node "$SCRIPT_DIR/scripts/sync_budget.cjs" "$XLSX_2026"
+    else
+        echo "  Filen blev ikke fundet: $XLSX_2026"
+    fi
+fi
+
+read -r -p "  Sti til 'Spiir Budget 2027.xlsx' (Enter = spring over): " XLSX_2027
+XLSX_2027="${XLSX_2027//\"/}"
+XLSX_2027="$(echo "$XLSX_2027" | xargs)"
+if [ -n "$XLSX_2027" ]; then
+    if [ -f "$XLSX_2027" ]; then
+        echo "  Importerer budget for 2027..."
+        node "$SCRIPT_DIR/scripts/sync_budget.cjs" "$XLSX_2027"
+    else
+        echo "  Filen blev ikke fundet: $XLSX_2027"
+    fi
+fi
+
+echo ""
+echo "===================================================="
 echo "  Migration gennemført!"
 echo ""
-echo "  Åbn Actual Budget og tjek at transaktionerne"
-echo "  er der og at saldiene stemmer."
-echo ""
-echo "  Vil du også importere dit Excel-budget?"
-echo "  Kør: node scripts/sync_budget.cjs 'Spiir Budget 2026.xlsx'"
+echo "  Åbn Actual Budget og verificer at transaktioner"
+echo "  og saldi stemmer."
 echo "===================================================="
 echo ""
