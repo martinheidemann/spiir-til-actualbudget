@@ -383,13 +383,21 @@ async function main() {
   }
   if (totalCleared === 0) console.log('  Alle poster var allerede cleared.');
 
-  await api.shutdown();
+  try { await api.shutdown(); } catch (e) { /* shutdown syncer internt — ignorer fejl */ }
   console.log('\nFærdig! Husk at sammenligne slutsaldi ovenfor med Actual Budget.');
 }
 
 main().catch(async err => {
-  console.error('\nFejl:', err.message);
+  // Vis fejltype og reason hvis det er en sync/PostError
+  const reason = err.reason || err.type || '';
+  console.error('\nFejl:', err.message || '(ingen besked)');
+  if (reason) console.error('Årsag:', reason);
   console.error(err.stack);
+  if (reason === 'network-failure' || err.message?.includes('network-failure')) {
+    console.error('\nTip: Actual Budget serveren afviste sync-kaldet (network-failure).');
+    console.error('     Prøv at køre scriptet igen — det er idempotent og fortsætter fra der af.');
+    console.error('     Hvis fejlen gentager sig: slet budgettet i Actual Budget UI og start forfra.');
+  }
   try { await api.shutdown(); } catch {}
   process.exit(1);
 });
