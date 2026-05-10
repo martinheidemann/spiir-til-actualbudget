@@ -121,6 +121,17 @@ set /p "CSV_FILE=  Sti til CSV-fil: "
 
 :: Fjern anfoerselstegn hvis filen er traekket ind
 set "CSV_FILE=!CSV_FILE:"=!"
+:: Konverter file://-URL til normal sti (naar filen traekkes ind fra Explorer i Windows Terminal)
+if "!CSV_FILE:~0,8!"=="file:///" set "CSV_FILE=!CSV_FILE:~8!"
+if "!CSV_FILE:~0,7!"=="file://" set "CSV_FILE=!CSV_FILE:~7!"
+:: Erstat URL-kodning med rigtige tegn
+set "CSV_FILE=!CSV_FILE:%%20= !"
+set "CSV_FILE=!CSV_FILE:%%28=(!"
+set "CSV_FILE=!CSV_FILE:%%29=)!"
+set "CSV_FILE=!CSV_FILE:%%26=&!"
+set "CSV_FILE=!CSV_FILE:%%2C=,!"
+:: Konverter forward slashes til backslashes
+set "CSV_FILE=!CSV_FILE:/=\!"
 :: Fjern evt. ledende/afsluttende mellemrum
 for /f "tokens=* delims= " %%a in ("!CSV_FILE!") do set "CSV_FILE=%%a"
 
@@ -183,6 +194,10 @@ echo   (Spiir.dk ^> Eksporter ^> Eksporter budget for 2026/2027)
 echo.
 set /p "XLSX_2026=  Sti til 'Spiir Budget 2026.xlsx' (Enter = spring over): "
 set "XLSX_2026=!XLSX_2026:"=!"
+if "!XLSX_2026:~0,8!"=="file:///" set "XLSX_2026=!XLSX_2026:~8!"
+if "!XLSX_2026:~0,7!"=="file://" set "XLSX_2026=!XLSX_2026:~7!"
+set "XLSX_2026=!XLSX_2026:%%20= !"
+set "XLSX_2026=!XLSX_2026:/=\!"
 
 if not "!XLSX_2026!"=="" (
     if exist "!XLSX_2026!" (
@@ -195,6 +210,10 @@ if not "!XLSX_2026!"=="" (
 
 set /p "XLSX_2027=  Sti til 'Spiir Budget 2027.xlsx' (Enter = spring over): "
 set "XLSX_2027=!XLSX_2027:"=!"
+if "!XLSX_2027:~0,8!"=="file:///" set "XLSX_2027=!XLSX_2027:~8!"
+if "!XLSX_2027:~0,7!"=="file://" set "XLSX_2027=!XLSX_2027:~7!"
+set "XLSX_2027=!XLSX_2027:%%20= !"
+set "XLSX_2027=!XLSX_2027:/=\!"
 
 if not "!XLSX_2027!"=="" (
     if exist "!XLSX_2027!" (
