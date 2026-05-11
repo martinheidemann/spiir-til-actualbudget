@@ -190,6 +190,9 @@ Scriptet er idempotent — du kan bare køre det igen. Det vil fortsætte fra de
 **Actual Budget viser en spinner og reagerer ikke**
 Budgettet kan være kommet i en korrupt tilstand. Slet det i Actual Budget UI og opret et nyt tomt budget, og kør migreringen igen.
 
+**Saldi passer ikke efter en ny import (slettet og startet forfra)**
+Scriptet gemmer en lokal kopi af budgettet i mappen `.actual-data`. Hvis du sletter budgettet i Actual Budget UI og importerer igen, kan den gamle cache give forkerte resultater. Slet mappen `.actual-data` i programmets mappe og kør migreringen igen — den oprettes automatisk på ny.
+
 **Noget andet driller?**
 Prøv et par gange og tjek fejlbeskeden grundigt. Virker det stadig ikke, er du velkommen til at skrive til **[martinheide+actual@gmail.com](mailto:martinheide+actual@gmail.com)**. Ingen garantier for svartid, men jeg hjælper gerne.
 
