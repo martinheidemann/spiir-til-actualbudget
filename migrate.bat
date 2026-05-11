@@ -118,6 +118,7 @@ echo   3. Vaelg "Eksporter data" og hent CSV-filen
 echo.
 echo   Traek CSV-filen ned i dette vindue, eller skriv stien manuelt.
 echo   Tryk Enter for at springe dette trin over ^(fx hvis du kun vil importere budget^).
+set "CSV_FILE="
 set /p "CSV_FILE=  Sti til CSV-fil [Enter = spring over]: "
 
 :: Fjern anfoerselstegn hvis filen er traekket ind
@@ -194,6 +195,7 @@ echo.
 echo   Har du downloadet dine budgetfiler fra Spiir?
 echo   (Spiir.dk ^> Eksporter ^> Eksporter budget for 2026/2027)
 echo.
+set "XLSX_2026="
 set /p "XLSX_2026=  Sti til 'Spiir Budget 2026.xlsx' (Enter = spring over): "
 set "XLSX_2026=!XLSX_2026:"=!"
 if "!XLSX_2026:~0,8!"=="file:///" set "XLSX_2026=!XLSX_2026:~8!"
@@ -210,6 +212,7 @@ if not "!XLSX_2026!"=="" (
     )
 )
 
+set "XLSX_2027="
 set /p "XLSX_2027=  Sti til 'Spiir Budget 2027.xlsx' (Enter = spring over): "
 set "XLSX_2027=!XLSX_2027:"=!"
 if "!XLSX_2027:~0,8!"=="file:///" set "XLSX_2027=!XLSX_2027:~8!"
