@@ -121,33 +121,15 @@ Du behøver kun gøre dette én gang.
 
 > **WSL-brugere:** Sørg for at `npm install` er kørt inde fra WSL-terminalen, ikke fra Windows — native Node.js-moduler skal kompileres til det rigtige OS.
 
-Programmet spørger om:
+Wizarden guider dig igennem hele migreringen i ét hug og spørger om følgende — tryk bare Enter for at springe et trin over:
 
-- **URL til Actual Budget** — brug `http://localhost:5006` hvis du bruger Desktop App
-- **Password** — det du satte i Trin 1
-- **Stien til din Spiir CSV-fil** — fra Trin 2
-- Du kan trykke Enter for at springe CSV-import over og kun importere Excel-budget
+1. **URL til Actual Budget** — brug `http://localhost:5006` hvis du bruger Desktop App
+2. **Password** — det du satte i Trin 1
+3. **Sti til Spiir CSV-filen** — fra Trin 2. Importerer kategorier og transaktioner (5–20 min — luk ikke vinduet)
+4. **Sti til `Spiir Budget 2026.xlsx`** — valgfrit, importerer budgetbeløb for 2026
+5. **Sti til `Spiir Budget 2027.xlsx`** — valgfrit, importerer budgetbeløb for 2027
 
-Importen tager **5–20 minutter** afhængigt af antallet af konti og størrelsen af din transaktionshistorik. Luk ikke vinduet imens.
-
----
-
-### Trin 6 (valgfrit) — Importér dit Excel-budget
-
-Har du downloadet dit budget fra Spiir som Excel-fil? Du kan importere budgetbeløbene til Actual Budget:
-
-```
-node scripts/sync_budget.cjs "sti/til/Spiir Budget 2026.xlsx"
-node scripts/sync_budget.cjs "sti/til/Spiir Budget 2027.xlsx"
-```
-
-**Test uden at ændre noget:**
-
-```
-node scripts/sync_budget.cjs "Spiir Budget 2026.xlsx" --dry-run
-```
-
-Scriptet vil fortælle dig hvilke Excel-kategorier det ikke fandt i Actual Budget.
+Du kan trække filer direkte ind i terminalvinduet i stedet for at skrive stien.
 
 ---
 
@@ -208,9 +190,6 @@ Scriptet er idempotent — du kan bare køre det igen. Det vil fortsætte fra de
 **Actual Budget viser en spinner og reagerer ikke**
 Budgettet kan være kommet i en korrupt tilstand. Slet det i Actual Budget UI og opret et nyt tomt budget, og kør migreringen igen.
 
-**Kategorier fra Excel matcher ikke**
-Kør `sync_budget.cjs --dry-run` for at se hvilke navne der ikke matchede. Tjek at kategorien findes i Actual Budget under præcis det navn Excel bruger.
-
 **Noget andet driller?**
 Prøv et par gange og tjek fejlbeskeden grundigt. Virker det stadig ikke, er du velkommen til at skrive til **[martinheide+actual@gmail.com](mailto:martinheide+actual@gmail.com)**. Ingen garantier for svartid, men jeg hjælper gerne.
 
@@ -221,10 +200,23 @@ Prøv et par gange og tjek fejlbeskeden grundigt. Virker det stadig ikke, er du 
 ### Manuel kørsel (uden wizard)
 
 ```powershell
-# Windows PowerShell / Mac Terminal
+# Importér kategorier og transaktioner fra CSV
 node scripts/initialize_budget.cjs "min-spiir-eksport.csv"
 node scripts/import_budget.cjs "min-spiir-eksport.csv"
-node scripts/import_budget.cjs "min-spiir-eksport.csv" --dry-run  # test
+node scripts/import_budget.cjs "min-spiir-eksport.csv" --dry-run  # test uden ændringer
+
+# Importér budgetbeløb fra Excel
+node scripts/sync_budget.cjs "Spiir Budget 2026.xlsx"
+node scripts/sync_budget.cjs "Spiir Budget 2026.xlsx" --dry-run   # test uden ændringer
+```
+
+Hvis kategorinavne i Excel ikke matcher Actual Budget, kør `--dry-run` for at se hvilke navne der mangler, og tilføj dem i `scripts/budget-mapping.json`:
+
+```json
+{
+  "Martin": "Løn",
+  "Toni": "Løn"
+}
 ```
 
 ### Selvhostet Actual Budget server
