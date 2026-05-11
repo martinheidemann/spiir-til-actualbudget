@@ -170,6 +170,20 @@ async function main() {
     byDupKey.get(k).push(t);
   }
 
+  // --- Deduplikering: for hvert (konto+dato+beløb+beskrivelse)-sæt beholdes kun én post ---
+  // Prioritering: ikke-Ignorer > Ignorer, derefter laveste Id (deterministisk).
+  const skipIds = new Set();
+  for (const [, group] of byDupKey) {
+    if (group.length <= 1) continue;
+    const sorted = [...group].sort((a, b) => {
+      const aIgn = a.CategoryName === 'Ignorer' ? 1 : 0;
+      const bIgn = b.CategoryName === 'Ignorer' ? 1 : 0;
+      if (aIgn !== bIgn) return aIgn - bIgn;
+      return a.Id < b.Id ? -1 : 1;
+    });
+    for (let i = 1; i < sorted.length; i++) skipIds.add(sorted[i].Id);
+  }
+
   // --- Klassificér transaktioner ---
   // For hver transfer-pair processerer vi kun ÉN side (den med negativt beløb / sender)
   // — så Actual selv opretter modtager-siden via transfer-payee
@@ -178,14 +192,14 @@ async function main() {
     regular: 0,
     matchedTransfers: 0,
     unmatchedTransfers: 0,
-    ignoredDuplicates: 0,
+    duplicatesSkipped: 0,
     ignoredKept: 0,
     udlaeg: 0,
     splitParentsSkipped: 0,
     splitChildren: 0,
   };
-  const skippedUnmatched = []; // { AccountName, Date, Amount, Description }
-  const skippedDuplicates = []; // { AccountName, Date, Amount, Description }
+  const skippedUnmatched = [];
+  const skippedDuplicates = [];
   // Til API: { accountName: [transaction, ...] }
   const toImport = new Map();
   const transferPairs = []; // {fromAccount, toAccount, fromTx, toTx}
@@ -197,20 +211,19 @@ async function main() {
     // børnene (med de reelle kategorier og beløb) importeres i stedet.
     if (t.SplitGroupId && t.SplitGroupId === t.Id) { stats.splitParentsSkipped++; continue; }
 
+    // Duplikat: skip alle undtagen den udvalgte pr. dupKey-gruppe
+    if (skipIds.has(t.Id)) {
+      stats.duplicatesSkipped++;
+      skippedDuplicates.push(t);
+      continue;
+    }
+
     const isKontooverforsel = t.CategoryName === 'Kontooverførsel';
     const isIgnorer = t.CategoryName === 'Ignorer';
     const isUdlaeg = t.CategoryName === 'Udlæg';
 
-    // Ignorer: spring over hvis dublet, ellers behold som "Ignoreret"-kategori
+    // Ignorer uden duplikat: behold som "Ignoreret"-kategori
     if (isIgnorer) {
-      const siblings = byDupKey.get(dupKey(t)) || [];
-      const hasOtherTx = siblings.some(s => s.Id !== t.Id && s.CategoryName !== 'Ignorer');
-      if (hasOtherTx) {
-        stats.ignoredDuplicates++;
-        skippedDuplicates.push(t);
-        continue;
-      }
-      // Behold som regulær med kategori "Ignoreret"
       stats.ignoredKept++;
       stats.regular++;
       t.__targetCategory = 'Ignoreret';
@@ -263,7 +276,7 @@ async function main() {
   print(`  Split-forældre sprunget:   ${stats.splitParentsSkipped} (kun børn importeres)`);
   print(`  Matchede overførsler (par): ${stats.matchedTransfers}`);
   print(`  Ikke-matchede overf.:       ${stats.unmatchedTransfers} (sprunget over)`);
-  print(`  Ignorer-dubletter:          ${stats.ignoredDuplicates} (sprunget over)\n`);
+  print(`  Dubletter sprunget over:    ${stats.duplicatesSkipped} (samme konto+dato+beløb+beskrivelse)\n`);
 
   // --- Rapport over sprungne poster pr. konto ---
   function skippedSummary(label, list) {
