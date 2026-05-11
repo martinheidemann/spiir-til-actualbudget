@@ -107,7 +107,7 @@ if exist "%ENV_FILE%" (
 echo.
 
 :: --------------------------------------------------------
-:: Trin 4: Vaelg CSV-fil
+:: Trin 4: Vaelg CSV-fil (valgfrit - Enter for at springe over)
 :: --------------------------------------------------------
 echo [Trin 4/5] Vaelg din Spiir CSV-eksport...
 echo.
@@ -116,8 +116,9 @@ echo   1. Gaa til spiir.dk og log ind
 echo   2. Klik pa dit navn oeverst til hoeire
 echo   3. Vaelg "Eksporter data" og hent CSV-filen
 echo.
-echo   Traek CSV-filen ned i dette vindue, eller skriv stien manuelt:
-set /p "CSV_FILE=  Sti til CSV-fil: "
+echo   Traek CSV-filen ned i dette vindue, eller skriv stien manuelt.
+echo   Tryk Enter for at springe dette trin over ^(fx hvis du kun vil importere budget^).
+set /p "CSV_FILE=  Sti til CSV-fil [Enter = spring over]: "
 
 :: Fjern anfoerselstegn hvis filen er traekket ind
 set "CSV_FILE=!CSV_FILE:"=!"
@@ -135,54 +136,55 @@ set "CSV_FILE=!CSV_FILE:/=\!"
 :: Fjern evt. ledende/afsluttende mellemrum
 for /f "tokens=* delims= " %%a in ("!CSV_FILE!") do set "CSV_FILE=%%a"
 
-if "!CSV_FILE!"=="" (
-    echo   FEJL: Ingen fil valgt.
-    pause
-    exit /b 1
+if not "!CSV_FILE!"=="" (
+    if not exist "!CSV_FILE!" (
+        echo   FEJL: Filen blev ikke fundet: !CSV_FILE!
+        pause
+        exit /b 1
+    )
+    echo   Fil valgt: !CSV_FILE!
+) else (
+    echo   Springer CSV-import over.
 )
-if not exist "!CSV_FILE!" (
-    echo   FEJL: Filen blev ikke fundet: !CSV_FILE!
-    pause
-    exit /b 1
-)
-echo   Fil valgt: !CSV_FILE!
 echo.
 
 :: --------------------------------------------------------
-:: Trin 5: Koel migreringen
+:: Trin 5: Koel migreringen (kun hvis CSV er valgt)
 :: --------------------------------------------------------
-echo [Trin 5/5] Starter migreringen...
-echo.
-echo   Trin 5a: Opretter kategorier i Actual Budget...
-node "%~dp0scripts\initialize_budget.cjs" "!CSV_FILE!"
-if !errorlevel! neq 0 (
+if not "!CSV_FILE!"=="" (
+    echo [Trin 5/5] Starter migreringen...
     echo.
-    echo   FEJL i initialize_budget. Se fejlbesked ovenfor.
-    echo   Mulige aarsager:
-    echo   - Actual Budget er ikke startet ^(aaben appen foerst^)
-    echo   - Forkert URL eller password i .env
-    echo   - Slet .env og koer migrate.bat igen for at rette konfigurationen
-    pause
-    exit /b 1
-)
+    echo   Trin 5a: Opretter kategorier i Actual Budget...
+    node "%~dp0scripts\initialize_budget.cjs" "!CSV_FILE!"
+    if !errorlevel! neq 0 (
+        echo.
+        echo   FEJL i initialize_budget. Se fejlbesked ovenfor.
+        echo   Mulige aarsager:
+        echo   - Actual Budget er ikke startet ^(aaben appen foerst^)
+        echo   - Forkert URL eller password i .env
+        echo   - Slet .env og koer migrate.bat igen for at rette konfigurationen
+        pause
+        exit /b 1
+    )
 
-echo.
-echo   Trin 5b: Importerer transaktioner (10-20 minutter)...
-echo   Luk IKKE dette vindue mens importen koerer.
-echo.
-node "%~dp0scripts\import_budget.cjs" "!CSV_FILE!"
-if !errorlevel! neq 0 (
     echo.
-    echo   FEJL i import_budget. Se fejlbesked ovenfor.
-    pause
-    exit /b 1
-)
+    echo   Trin 5b: Importerer transaktioner ^(10-20 minutter^)...
+    echo   Luk IKKE dette vindue mens importen koerer.
+    echo.
+    node "%~dp0scripts\import_budget.cjs" "!CSV_FILE!"
+    if !errorlevel! neq 0 (
+        echo.
+        echo   FEJL i import_budget. Se fejlbesked ovenfor.
+        pause
+        exit /b 1
+    )
 
-echo.
-echo ====================================================
-echo   Transaktioner importeret!
-echo ====================================================
-echo.
+    echo.
+    echo ====================================================
+    echo   Transaktioner importeret!
+    echo ====================================================
+    echo.
+)
 
 :: --------------------------------------------------------
 :: Trin 6 (valgfrit): Excel-budgetimport

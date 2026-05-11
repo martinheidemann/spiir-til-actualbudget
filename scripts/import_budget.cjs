@@ -66,14 +66,36 @@ function toActualAmount(kr) {
   return Math.round(kr * 100);
 }
 
+// --- Undertrykker API'ets interne console-spam (ignored: true, Syncing since, osv.) ---
+const _origLog = console.log.bind(console);
+const _origWarn = console.warn.bind(console);
+function print(...args) { _origLog(...args); }
+
+/** Kør en async API-funktion uden interne log-beskeder fra @actual-app/api */
+async function quietly(fn) {
+  console.log = () => {};
+  console.warn = () => {};
+  try { return await fn(); }
+  finally { console.log = _origLog; console.warn = _origWarn; }
+}
+
+/** Vis en progress-bar på én linje (overskriver sig selv med \r) */
+function showProgress(label, current, total) {
+  const width = 28;
+  const filled = total > 0 ? Math.round((current / total) * width) : width;
+  const bar = '='.repeat(filled) + ' '.repeat(width - filled);
+  const pct = total > 0 ? Math.round((current / total) * 100) : 100;
+  process.stdout.write(`\r  [${bar}] ${String(pct).padStart(3)}%  ${current}/${total}  ${label}   `);
+}
+
 async function main() {
-  console.log(`=== Spiir → Actual Budget import ===`);
-  console.log(`Mode: ${DRY_RUN ? 'DRY-RUN (ingen import)' : 'LIVE (importerer)'}\n`);
+  print(`=== Spiir → Actual Budget import ===`);
+  print(`Mode: ${DRY_RUN ? 'DRY-RUN (ingen import)' : 'LIVE (importerer)'}\n`);
 
   // --- Indlæs CSV ---
-  console.log(`Læser ${path.basename(CSV_FILE)}...`);
+  print(`Læser ${path.basename(CSV_FILE)}...`);
   const txs = readCsvAsObjects(CSV_FILE);
-  console.log(`  ${txs.length} transaktioner indlæst\n`);
+  print(`  ${txs.length} transaktioner indlæst\n`);
 
   // --- Gruppér pr. konto ---
   const byAccount = new Map();
@@ -81,7 +103,7 @@ async function main() {
     if (!byAccount.has(t.AccountName)) byAccount.set(t.AccountName, []);
     byAccount.get(t.AccountName).push(t);
   }
-  console.log(`Konti fundet: ${[...byAccount.keys()].join(', ')}\n`);
+  print(`Konti fundet: ${[...byAccount.keys()].join(', ')}\n`);
 
   // --- Sortér hver konto kronologisk (ældste først) ---
   for (const arr of byAccount.values()) {
@@ -202,53 +224,53 @@ async function main() {
     toImport.get(t.AccountName).push(t);
   }
 
-  console.log(`Klassificering:`);
-  console.log(`  Regulære transaktioner:    ${stats.regular}`);
-  console.log(`     heraf udlæg:             ${stats.udlaeg}`);
-  console.log(`     heraf split-poster:      ${stats.splits}`);
-  console.log(`     heraf bevarede Ignorer:  ${stats.ignoredKept}`);
-  console.log(`  Matchede overførsler (par): ${stats.matchedTransfers}`);
-  console.log(`  Ikke-matchede overf.:       ${stats.unmatchedTransfers} (sprunget over)`);
-  console.log(`  Ignorer-dubletter:          ${stats.ignoredDuplicates} (sprunget over)\n`);
+  print(`Klassificering:`);
+  print(`  Regulære transaktioner:    ${stats.regular}`);
+  print(`     heraf udlæg:             ${stats.udlaeg}`);
+  print(`     heraf split-poster:      ${stats.splits}`);
+  print(`     heraf bevarede Ignorer:  ${stats.ignoredKept}`);
+  print(`  Matchede overførsler (par): ${stats.matchedTransfers}`);
+  print(`  Ikke-matchede overf.:       ${stats.unmatchedTransfers} (sprunget over)`);
+  print(`  Ignorer-dubletter:          ${stats.ignoredDuplicates} (sprunget over)\n`);
 
-  console.log(`Åbningssaldi (1. postering i Spiir):`);
-  for (const [acc, bal] of openingBalances) console.log(`  ${acc.padEnd(20)} ${bal.toFixed(2).padStart(12)} kr`);
-  console.log(`\nSlutsaldi (sidste postering i Spiir):`);
-  for (const [acc, bal] of closingBalances) console.log(`  ${acc.padEnd(20)} ${bal.toFixed(2).padStart(12)} kr`);
-  console.log();
+  print(`Åbningssaldi (1. postering i Spiir):`);
+  for (const [acc, bal] of openingBalances) print(`  ${acc.padEnd(20)} ${bal.toFixed(2).padStart(12)} kr`);
+  print(`\nSlutsaldi (sidste postering i Spiir):`);
+  for (const [acc, bal] of closingBalances) print(`  ${acc.padEnd(20)} ${bal.toFixed(2).padStart(12)} kr`);
+  print();
 
   if (DRY_RUN) {
-    console.log('DRY-RUN — afslutter uden at importere.\n');
+    print('DRY-RUN — afslutter uden at importere.\n');
     return;
   }
 
   // --- Forbind til Actual Budget ---
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  console.log('Forbinder til Actual Budget...');
-  await api.init({ dataDir: DATA_DIR, serverURL: SERVER_URL, password: PASSWORD });
+  print('Forbinder til Actual Budget...');
+  await quietly(() => api.init({ dataDir: DATA_DIR, serverURL: SERVER_URL, password: PASSWORD }));
 
-  const budgets = await api.getBudgets();
+  const budgets = await quietly(() => api.getBudgets());
   if (budgets.length === 0) throw new Error('Ingen budgetter på serveren');
   const budget = budgets[0];
-  console.log(`Henter budget: ${budget.name}\n`);
-  await api.downloadBudget(budget.groupId);
+  print(`Henter budget: ${budget.name}\n`);
+  await quietly(() => api.downloadBudget(budget.groupId));
 
   // --- Opret/find konti ---
-  console.log('Opretter konti (hvis ikke eksisterer)...');
-  const existingAccounts = await api.getAccounts();
+  print('Opretter konti (hvis ikke eksisterer)...');
+  const existingAccounts = await quietly(() => api.getAccounts());
   const accountIdByName = new Map();
   for (const acc of existingAccounts) accountIdByName.set(acc.name, acc.id);
 
   for (const [accName, openBal] of openingBalances) {
     if (accountIdByName.has(accName)) {
-      console.log(`  Findes: ${accName}`);
+      print(`  Findes: ${accName}`);
       continue;
     }
-    const id = await api.createAccount({ name: accName, type: 'checking' }, toActualAmount(openBal));
+    const id = await quietly(() => api.createAccount({ name: accName, type: 'checking' }, toActualAmount(openBal)));
     accountIdByName.set(accName, id);
-    console.log(`  Oprettet: ${accName} (åbn.saldo ${openBal.toFixed(2)} kr)`);
+    print(`  Oprettet: ${accName} (åbn.saldo ${openBal.toFixed(2)} kr)`);
   }
-  console.log();
+  print();
 
   // --- Build kategori-lookup (CategoryName → category id) ---
   let groups = await api.getCategoryGroups();
@@ -270,21 +292,21 @@ async function main() {
     let diverseGroup = groups.find(g => g.name.toLowerCase() === 'diverse');
     let diverseGroupId = diverseGroup?.id;
     if (!diverseGroupId) {
-      diverseGroupId = await api.createCategoryGroup({ name: 'Diverse', is_income: false });
-      console.log('  Oprettet gruppe: Diverse');
-      groups = await api.getCategoryGroups();
+      diverseGroupId = await quietly(() => api.createCategoryGroup({ name: 'Diverse', is_income: false }));
+      print('  Oprettet gruppe: Diverse');
+      groups = await quietly(() => api.getCategoryGroups());
     }
-    await api.createCategory({ name: extra, group_id: diverseGroupId, is_income: false });
-    console.log(`  Oprettet kategori: ${extra} (under Diverse)`);
+    await quietly(() => api.createCategory({ name: extra, group_id: diverseGroupId, is_income: false }));
+    print(`  Oprettet kategori: ${extra} (under Diverse)`);
     needsRebuild = true;
   }
   if (needsRebuild) {
-    groups = await api.getCategoryGroups();
+    groups = await quietly(() => api.getCategoryGroups());
     rebuildCategoryMap();
   }
 
   // --- Build transfer-payee lookup (account id → transfer payee id) ---
-  const allPayees = await api.getPayees();
+  const allPayees = await quietly(() => api.getPayees());
   const transferPayeeByAccountId = new Map();
   for (const p of allPayees) {
     if (p.transfer_acct) transferPayeeByAccountId.set(p.transfer_acct, p.id);
@@ -323,7 +345,7 @@ async function main() {
     if (!fromAccId || !toAccId) continue;
     const transferPayeeId = transferPayeeByAccountId.get(toAccId);
     if (!transferPayeeId) {
-      console.warn(`Ingen transfer-payee for ${toTx.AccountName} — springer over`);
+      _origWarn(`Ingen transfer-payee for ${toTx.AccountName} — springer over`);
       continue;
     }
     const notes = [fromTx.OriginalDescription, fromTx.Comment].filter(Boolean).join(' | ');
@@ -340,7 +362,7 @@ async function main() {
   // --- Importér i batches ---
   // Sync efter hver batch for at undgå at akkumulere så mange ændringer at
   // serverens body-size limit sprænges (PayloadTooLargeError).
-  console.log('Importerer transaktioner...');
+  print('Importerer transaktioner...');
   for (const [accName, list] of apiTxByAccount) {
     const accId = accountIdByName.get(accName);
     let added = 0, updated = 0;
@@ -348,15 +370,17 @@ async function main() {
     list.sort((a, b) => a.date.localeCompare(b.date));
     for (let i = 0; i < list.length; i += BATCH_SIZE) {
       const batch = list.slice(i, i + BATCH_SIZE);
-      const result = await api.importTransactions(accId, batch);
+      showProgress(accName, i, list.length);
+      const result = await quietly(() => api.importTransactions(accId, batch));
       added += result.added?.length || 0;
       updated += result.updated?.length || 0;
       // Tving sync til serveren mellem hver batch
-      try { await api.sync(); }
-      catch (e) { console.warn(`\n  Sync-advarsel: ${e.message}`); }
-      process.stdout.write(`  ${accName}: ${i + batch.length}/${list.length}\r`);
+      try { await quietly(() => api.sync()); }
+      catch (e) { process.stdout.write('\n'); _origWarn(`  Sync-advarsel: ${e.message}`); }
     }
-    console.log(`  ${accName}: ${list.length} behandlet (tilføjet: ${added}, opdateret: ${updated})`);
+    showProgress(accName, list.length, list.length);
+    process.stdout.write('\n');
+    print(`  ${accName}: ${list.length} behandlet (tilføjet: ${added}, opdateret: ${updated})`);
   }
 
   // --- Marker alle transaktioner som cleared ---
@@ -364,27 +388,30 @@ async function main() {
   // import-kaldet. Vi kører derfor et ekstra pas der retter alle ucleared poster
   // — alle Spiir-transaktioner er historiske og skal være cleared.
   // Synkroniseres i batches for at undgå PayloadTooLargeError/network-failure.
-  console.log('\nMarkerer ucleared transaktioner som cleared...');
+  print('\nMarkerer ucleared transaktioner som cleared...');
   let totalCleared = 0;
   for (const [accName, accId] of accountIdByName) {
-    const transactions = await api.getTransactions(accId);
+    const transactions = await quietly(() => api.getTransactions(accId));
     const uncleared = transactions.filter(t => !t.cleared);
     if (uncleared.length === 0) continue;
     for (let i = 0; i < uncleared.length; i += BATCH_SIZE) {
       const batch = uncleared.slice(i, i + BATCH_SIZE);
+      showProgress(accName, i, uncleared.length);
       for (const t of batch) {
-        await api.updateTransaction(t.id, { cleared: true });
+        await quietly(() => api.updateTransaction(t.id, { cleared: true }));
       }
-      try { await api.sync(); } catch (e) { console.warn(`  Sync-advarsel: ${e.message}`); }
-      process.stdout.write(`  ${accName}: ${i + batch.length}/${uncleared.length}\r`);
+      try { await quietly(() => api.sync()); }
+      catch (e) { process.stdout.write('\n'); _origWarn(`  Sync-advarsel: ${e.message}`); }
     }
+    showProgress(accName, uncleared.length, uncleared.length);
+    process.stdout.write('\n');
     totalCleared += uncleared.length;
-    console.log(`  ${accName}: ${uncleared.length} poster markeret              `);
+    print(`  ${accName}: ${uncleared.length} poster markeret`);
   }
-  if (totalCleared === 0) console.log('  Alle poster var allerede cleared.');
+  if (totalCleared === 0) print('  Alle poster var allerede cleared.');
 
-  try { await api.shutdown(); } catch (e) { /* shutdown syncer internt — ignorer fejl */ }
-  console.log('\nFærdig! Husk at sammenligne slutsaldi ovenfor med Actual Budget.');
+  try { await quietly(() => api.shutdown()); } catch (e) { /* shutdown syncer internt — ignorer fejl */ }
+  print('\nFærdig! Husk at sammenligne slutsaldi ovenfor med Actual Budget.');
 }
 
 main().catch(async err => {
