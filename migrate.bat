@@ -119,11 +119,9 @@ echo.
 echo   Traek CSV-filen ned i dette vindue, eller skriv stien manuelt.
 echo   Tryk Enter for at springe dette trin over ^(fx hvis du kun vil importere budget^).
 set "CSV_FILE="
-set /p CSV_FILE=  Sti til CSV-fil (Enter = spring over):
-if not defined CSV_FILE goto :csv_empty
-:: Fjern anfoerselstegn
+for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "Read-Host"`) do set "CSV_FILE=%%i"
+:: Fjern anfoerselstegn og spring over hvis tomt
 set CSV_FILE=!CSV_FILE:"=!
-:: Spring normalisering over og gaa direkte videre hvis tomt
 if "!CSV_FILE!"=="" goto :csv_empty
 :: Konverter file://-URL til normal sti (naar filen traekkes ind fra Explorer i Windows Terminal)
 if "!CSV_FILE:~0,8!"=="file:///" set "CSV_FILE=!CSV_FILE:~8!"
@@ -197,9 +195,9 @@ echo   Har du downloadet dine budgetfiler fra Spiir?
 echo   (Spiir.dk ^> Eksporter ^> Eksporter budget for 2026/2027)
 echo.
 set "XLSX_2026="
-set /p XLSX_2026=  Sti til 'Spiir Budget 2026.xlsx' (Enter = spring over)
-if not defined XLSX_2026 goto :xlsx26_skip
+for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "Read-Host"`) do set "XLSX_2026=%%i"
 set XLSX_2026=!XLSX_2026:"=!
+if "!XLSX_2026!"=="" goto :xlsx26_skip
 if "!XLSX_2026:~0,8!"=="file:///" set "XLSX_2026=!XLSX_2026:~8!"
 if "!XLSX_2026:~0,7!"=="file://" set "XLSX_2026=!XLSX_2026:~7!"
 set "XLSX_2026=!XLSX_2026:%%20= !"
@@ -213,9 +211,9 @@ if exist "!XLSX_2026!" (
 :xlsx26_skip
 
 set "XLSX_2027="
-set /p XLSX_2027=  Sti til 'Spiir Budget 2027.xlsx' (Enter = spring over)
-if not defined XLSX_2027 goto :xlsx27_skip
+for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "Read-Host"`) do set "XLSX_2027=%%i"
 set XLSX_2027=!XLSX_2027:"=!
+if "!XLSX_2027!"=="" goto :xlsx27_skip
 if "!XLSX_2027:~0,8!"=="file:///" set "XLSX_2027=!XLSX_2027:~8!"
 if "!XLSX_2027:~0,7!"=="file://" set "XLSX_2027=!XLSX_2027:~7!"
 set "XLSX_2027=!XLSX_2027:%%20= !"
