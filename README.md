@@ -210,15 +210,6 @@ node scripts/sync_budget.cjs "Spiir Budget 2026.xlsx"
 node scripts/sync_budget.cjs "Spiir Budget 2026.xlsx" --dry-run   # test uden ændringer
 ```
 
-Hvis kategorinavne i Excel ikke matcher Actual Budget, kør `--dry-run` for at se hvilke navne der mangler, og tilføj dem i `scripts/budget-mapping.json`:
-
-```json
-{
-  "Martin": "Løn",
-  "Toni": "Løn"
-}
-```
-
 ### Selvhostet Actual Budget server
 
 Ændre `.env` til at pege på din server:
