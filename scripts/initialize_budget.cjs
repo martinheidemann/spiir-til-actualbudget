@@ -47,6 +47,14 @@ if (!fs.existsSync(CSV_FILE)) {
 if (!SERVER_URL) { console.error('Mangler ACTUAL_SERVER_URL i .env.'); process.exit(1); }
 if (!PASSWORD) { console.error('Mangler ACTUAL_PASSWORD i .env.'); process.exit(1); }
 
+// --- Undertrykker @actual-app/api interne log-beskeder ---
+const _origLog = console.log.bind(console);
+const _origWarn = console.warn.bind(console);
+async function quietly(fn) {
+  console.log = () => {}; console.warn = () => {};
+  try { return await fn(); } finally { console.log = _origLog; console.warn = _origWarn; }
+}
+
 // --- Udled kategori-struktur fra CSV ---
 function deriveCategoriesFromCsv(filePath) {
   const txs = readCsvAsObjects(filePath);
@@ -75,20 +83,20 @@ async function main() {
   console.log(`  ${derived.size} grupper, ${[...derived.values()].reduce((n, g) => n + g.categories.size, 0)} kategorier udledt fra data\n`);
 
   console.log('Forbinder til Actual Budget...');
-  await api.init({ dataDir: DATA_DIR, serverURL: SERVER_URL, password: PASSWORD });
+  await quietly(() => api.init({ dataDir: DATA_DIR, serverURL: SERVER_URL, password: PASSWORD }));
 
-  const budgets = await api.getBudgets();
+  const budgets = await quietly(() => api.getBudgets());
   if (budgets.length === 0) {
     console.error('Ingen budgetter på serveren. Opret et tomt budget i Actual Budget UI først.');
-    await api.shutdown();
+    await quietly(() => api.shutdown());
     process.exit(1);
   }
   const budget = budgets[0];
   console.log(`Henter budget: ${budget.name}\n`);
-  await api.downloadBudget(budget.groupId);
+  await quietly(() => api.downloadBudget(budget.groupId));
 
   // --- Hent eksisterende grupper og kategorier ---
-  let existingGroups = await api.getCategoryGroups();
+  let existingGroups = await quietly(() => api.getCategoryGroups());
   let incomeGroup = existingGroups.find(g => g.is_income);
 
   // Hvis en tidligere kørsel har skabt en *expense*-version af income-gruppen,
@@ -101,14 +109,14 @@ async function main() {
       console.log(`\nFjerner fejlplaceret expense-gruppe: ${g.name}`);
       for (const c of (g.categories || [])) {
         try {
-          await api.deleteCategory(c.id);
+          await quietly(() => api.deleteCategory(c.id));
           console.log(`  Slettet kategori: ${c.name}`);
         } catch (e) {
           console.warn(`  Kunne ikke slette "${c.name}": ${e.message}`);
         }
       }
       try {
-        await api.deleteCategoryGroup(g.id);
+        await quietly(() => api.deleteCategoryGroup(g.id));
         console.log(`  Slettet gruppe: ${g.name}`);
       } catch (e) {
         console.warn(`  Kunne ikke slette gruppe "${g.name}": ${e.message}`);
@@ -117,7 +125,7 @@ async function main() {
   }
 
   // Refresh
-  existingGroups = await api.getCategoryGroups();
+  existingGroups = await quietly(() => api.getCategoryGroups());
   incomeGroup = existingGroups.find(g => g.is_income);
   const existingGroupByName = new Map(existingGroups.map(g => [g.name.toLowerCase(), g]));
   const existingCatNames = new Set(existingGroups.flatMap(g => (g.categories || []).map(c => c.name.toLowerCase())));
@@ -131,21 +139,21 @@ async function main() {
       if (incomeGroup) {
         groupId = incomeGroup.id;
         if (incomeGroup.name !== groupName) {
-          await api.updateCategoryGroup(incomeGroup.id, { name: groupName });
+          await quietly(() => api.updateCategoryGroup(incomeGroup.id, { name: groupName }));
           console.log(`Omdøbt income-gruppe: ${incomeGroup.name} → ${groupName}`);
           incomeGroup.name = groupName;
         } else {
           console.log(`Bruger eksisterende income-gruppe: ${groupName}`);
         }
       } else {
-        groupId = await api.createCategoryGroup({ name: groupName, is_income: true });
+        groupId = await quietly(() => api.createCategoryGroup({ name: groupName, is_income: true }));
         console.log(`Oprettet income-gruppe: ${groupName}`);
       }
     } else if (existingGroupByName.has(groupName.toLowerCase())) {
       groupId = existingGroupByName.get(groupName.toLowerCase()).id;
       console.log(`Gruppe findes allerede: ${groupName}`);
     } else {
-      groupId = await api.createCategoryGroup({ name: groupName, is_income: false });
+      groupId = await quietly(() => api.createCategoryGroup({ name: groupName, is_income: false }));
       console.log(`Oprettet gruppe: ${groupName}`);
     }
     for (const [catName, catType] of info.categories) {
@@ -153,33 +161,33 @@ async function main() {
         console.log(`  Kategori findes allerede: ${catName}`);
         continue;
       }
-      await api.createCategory({
+      await quietly(() => api.createCategory({
         name: catName,
         group_id: groupId,
         is_income: catType === 'Income',
-      });
+      }));
       console.log(`  Oprettet kategori: ${catName}`);
     }
   }
 
   // --- Opret Ignoreret og Udlæg under Diverse (hvis de ikke allerede findes) ---
-  const groupsAfter = await api.getCategoryGroups();
+  const groupsAfter = await quietly(() => api.getCategoryGroups());
   const allCats = new Set(groupsAfter.flatMap(g => (g.categories || []).map(c => c.name.toLowerCase())));
   let diverse = groupsAfter.find(g => g.name.toLowerCase() === 'diverse');
   let diverseId = diverse?.id;
   if (!diverseId) {
-    diverseId = await api.createCategoryGroup({ name: 'Diverse', is_income: false });
+    diverseId = await quietly(() => api.createCategoryGroup({ name: 'Diverse', is_income: false }));
     console.log('\nOprettet gruppe: Diverse');
   }
   for (const extra of ['Ignoreret', 'Udlæg']) {
     if (!allCats.has(extra.toLowerCase())) {
-      await api.createCategory({ name: extra, group_id: diverseId, is_income: false });
+      await quietly(() => api.createCategory({ name: extra, group_id: diverseId, is_income: false }));
       console.log(`  Oprettet ekstra kategori: ${extra} (under Diverse)`);
     }
   }
 
   console.log('\nFærdig! Kør derefter: node scripts/import_budget.cjs <csv-fil>');
-  await api.shutdown();
+  await quietly(() => api.shutdown());
 }
 
 main().catch(async err => {

@@ -56,6 +56,14 @@ if (!fs.existsSync(XLSX_FILE)) {
 if (!SERVER_URL) { console.error('Mangler ACTUAL_SERVER_URL i .env.'); process.exit(1); }
 if (!PASSWORD) { console.error('Mangler ACTUAL_PASSWORD i .env.'); process.exit(1); }
 
+// --- Undertrykker @actual-app/api interne log-beskeder ---
+const _origLog = console.log.bind(console);
+const _origWarn = console.warn.bind(console);
+async function quietly(fn) {
+  console.log = () => {}; console.warn = () => {};
+  try { return await fn(); } finally { console.log = _origLog; console.warn = _origWarn; }
+}
+
 // Månedsnavne (dansk og engelsk for robusthed)
 const MONTH_NAMES = ['jan', 'feb', 'mar', 'apr', 'maj', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
 const MONTH_NAMES_EN = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
@@ -235,16 +243,16 @@ async function main() {
   // --- Forbind til Actual Budget ---
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
   console.log('Forbinder til Actual Budget...');
-  await api.init({ dataDir: DATA_DIR, serverURL: SERVER_URL, password: PASSWORD });
+  await quietly(() => api.init({ dataDir: DATA_DIR, serverURL: SERVER_URL, password: PASSWORD }));
 
-  const budgets = await api.getBudgets();
+  const budgets = await quietly(() => api.getBudgets());
   if (budgets.length === 0) throw new Error('Ingen budgetter på serveren');
   const budget = budgets[0];
   console.log(`Henter budget: ${budget.name}\n`);
-  await api.downloadBudget(budget.groupId);
+  await quietly(() => api.downloadBudget(budget.groupId));
 
   // --- Byg kategori-lookup ---
-  const groups = await api.getCategoryGroups();
+  const groups = await quietly(() => api.getCategoryGroups());
   const categoryIdByName = new Map();
   for (const g of groups) {
     for (const c of (g.categories || [])) {
@@ -267,7 +275,7 @@ async function main() {
       console.log(`\nKategorier der IKKE findes i Actual Budget (tilføj til budget-mapping.json):`);
       for (const n of [...notFound].sort()) console.log(`  "${n}"`);
     }
-    await api.shutdown();
+    await quietly(() => api.shutdown());
     return;
   }
 
@@ -280,12 +288,12 @@ async function main() {
     const [catName, month] = key.split('|||');
     const catId = categoryIdByName.get(catName.toLowerCase());
     if (!catId) { notFound.add(catName); skipped++; continue; }
-    await api.setBudgetAmount(month, catId, toActualAmount(dkk));
+    await quietly(() => api.setBudgetAmount(month, catId, toActualAmount(dkk)));
     set++;
   }
 
-  await api.sync();
-  await api.shutdown();
+  await quietly(() => api.sync());
+  await quietly(() => api.shutdown());
 
   console.log(`\nFærdig!`);
   console.log(`  Sat:      ${set} budgetposter`);
@@ -299,6 +307,6 @@ async function main() {
 main().catch(async err => {
   console.error('\nFejl:', err.message);
   console.error(err.stack);
-  try { await api.shutdown(); } catch {}
+  try { await quietly(() => api.shutdown()); } catch {}
   process.exit(1);
 });
