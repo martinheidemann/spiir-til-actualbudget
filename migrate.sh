@@ -59,7 +59,7 @@ if [ -f "$ENV_FILE" ]; then
     echo "  Fundet eksisterende .env — genbruger konfiguration."
     echo "  (Slet .env for at ændre indstillingerne)"
     # Udlæs URL til visning
-    ACTUAL_SERVER_URL=$(grep "^ACTUAL_SERVER_URL=" "$ENV_FILE" | cut -d= -f2- | tr -d "'" '"')
+    ACTUAL_SERVER_URL=$(grep "^ACTUAL_SERVER_URL=" "$ENV_FILE" | cut -d= -f2- | tr -d "'\"")
     echo "  URL: $ACTUAL_SERVER_URL"
     echo "  Password: (skjult)"
 else
@@ -100,57 +100,60 @@ echo "  1. Gå til spiir.dk og log ind"
 echo "  2. Klik på dit navn øverst til højre"
 echo "  3. Vælg 'Eksporter data' og hent CSV-filen"
 echo ""
-read -r -p "  Sti til CSV-fil (træk filen ind i terminalen): " CSV_FILE
+echo "  Træk CSV-filen ind i dette vindue, eller skriv stien manuelt."
+echo "  Tryk Enter for at springe dette trin over."
+echo ""
+read -r CSV_FILE
 
-# Fjern eventuelle anførselstegn
+# Fjern eventuelle anførselstegn og trim whitespace
 CSV_FILE="${CSV_FILE//\"/}"
 CSV_FILE="${CSV_FILE//\'/}"
-# Trim whitespace
-CSV_FILE="$(echo "$CSV_FILE" | xargs)"
+CSV_FILE="$(echo "$CSV_FILE" | xargs 2>/dev/null || echo "")"
 
 if [ -z "$CSV_FILE" ]; then
-    echo "  FEJL: Ingen fil valgt."
-    exit 1
-fi
-if [ ! -f "$CSV_FILE" ]; then
+    echo "  Springer CSV-import over."
+elif [ ! -f "$CSV_FILE" ]; then
     echo "  FEJL: Filen blev ikke fundet: $CSV_FILE"
     exit 1
+else
+    echo "  Fil valgt: $CSV_FILE"
 fi
-echo "  Fil valgt: $CSV_FILE"
 echo ""
 
 # --------------------------------------------------------
-# Trin 5: Kør migreringen
+# Trin 5: Kør migreringen (kun hvis CSV er valgt)
 # --------------------------------------------------------
-echo "[Trin 5/5] Starter migreringen..."
-echo ""
-
-echo "  Trin 5a: Opretter kategorier i Actual Budget..."
-if ! node "$SCRIPT_DIR/scripts/initialize_budget.cjs" "$CSV_FILE"; then
+if [ -n "$CSV_FILE" ]; then
+    echo "[Trin 5/5] Starter migreringen..."
     echo ""
-    echo "  FEJL i initialize_budget. Se fejlbesked ovenfor."
-    echo "  Mulige årsager:"
-    echo "  - Actual Budget er ikke startet (åbn appen først)"
-    echo "  - Forkert URL eller password i .env"
-    echo "  - Slet .env og kør migrate.sh igen for at rette konfigurationen"
-    exit 1
-fi
 
-echo ""
-echo "  Trin 5b: Importerer transaktioner (10-20 minutter)..."
-echo "  Luk IKKE dette vindue mens importen kører."
-echo ""
-if ! node "$SCRIPT_DIR/scripts/import_budget.cjs" "$CSV_FILE"; then
+    echo "  Trin 5a: Opretter kategorier i Actual Budget..."
+    if ! node "$SCRIPT_DIR/scripts/initialize_budget.cjs" "$CSV_FILE"; then
+        echo ""
+        echo "  FEJL i initialize_budget. Se fejlbesked ovenfor."
+        echo "  Mulige årsager:"
+        echo "  - Actual Budget er ikke startet (åbn appen først)"
+        echo "  - Forkert URL eller password i .env"
+        echo "  - Slet .env og kør migrate.sh igen for at rette konfigurationen"
+        exit 1
+    fi
+
     echo ""
-    echo "  FEJL i import_budget. Se fejlbesked ovenfor."
-    exit 1
-fi
+    echo "  Trin 5b: Importerer transaktioner (10-20 minutter)..."
+    echo "  Luk IKKE dette vindue mens importen kører."
+    echo ""
+    if ! node "$SCRIPT_DIR/scripts/import_budget.cjs" "$CSV_FILE"; then
+        echo ""
+        echo "  FEJL i import_budget. Se fejlbesked ovenfor."
+        exit 1
+    fi
 
-echo ""
-echo "===================================================="
-echo "  Transaktioner importeret!"
-echo "===================================================="
-echo ""
+    echo ""
+    echo "===================================================="
+    echo "  Transaktioner importeret!"
+    echo "===================================================="
+    echo ""
+fi
 
 # --------------------------------------------------------
 # Trin 6 (valgfrit): Excel-budgetimport
