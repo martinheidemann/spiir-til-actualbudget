@@ -184,6 +184,8 @@ async function main() {
     splitParentsSkipped: 0,
     splitChildren: 0,
   };
+  const skippedUnmatched = []; // { AccountName, Date, Amount, Description }
+  const skippedDuplicates = []; // { AccountName, Date, Amount, Description }
   // Til API: { accountName: [transaction, ...] }
   const toImport = new Map();
   const transferPairs = []; // {fromAccount, toAccount, fromTx, toTx}
@@ -205,6 +207,7 @@ async function main() {
       const hasOtherTx = siblings.some(s => s.Id !== t.Id && s.CategoryName !== 'Ignorer');
       if (hasOtherTx) {
         stats.ignoredDuplicates++;
+        skippedDuplicates.push(t);
         continue;
       }
       // Behold som regulær med kategori "Ignoreret"
@@ -236,6 +239,7 @@ async function main() {
       }
       // Ingen match → ekstern overførsel, spring over
       stats.unmatchedTransfers++;
+      skippedUnmatched.push(t);
       continue;
     }
 
@@ -260,6 +264,31 @@ async function main() {
   print(`  Matchede overførsler (par): ${stats.matchedTransfers}`);
   print(`  Ikke-matchede overf.:       ${stats.unmatchedTransfers} (sprunget over)`);
   print(`  Ignorer-dubletter:          ${stats.ignoredDuplicates} (sprunget over)\n`);
+
+  // --- Rapport over sprungne poster pr. konto ---
+  function skippedSummary(label, list) {
+    if (list.length === 0) return;
+    print(`${label} (${list.length} poster):`);
+    // Sum pr. konto
+    const sumByAcc = new Map();
+    for (const t of list) {
+      const amt = parseDanishAmount(t.Amount);
+      sumByAcc.set(t.AccountName, (sumByAcc.get(t.AccountName) || 0) + amt);
+    }
+    for (const [acc, sum] of [...sumByAcc].sort()) {
+      const count = list.filter(t => t.AccountName === acc).length;
+      print(`  ${acc.padEnd(22)} ${String(count).padStart(4)} poster   netto ${sum.toFixed(2).padStart(12)} kr`);
+    }
+    // Detaljer
+    for (const t of list) {
+      const amt = parseDanishAmount(t.Amount);
+      const desc = (t.Description || t.OriginalDescription || '').slice(0, 35);
+      print(`    ${t.Date}  ${t.AccountName.padEnd(18)}  ${amt.toFixed(2).padStart(10)} kr  ${desc}`);
+    }
+    print();
+  }
+  skippedSummary('Ikke-matchede overførsler (sprunget over)', skippedUnmatched);
+  skippedSummary('Ignorer-dubletter (sprunget over)', skippedDuplicates);
 
   print(`Åbningssaldi (1. postering i Spiir):`);
   for (const [acc, bal] of openingBalances) print(`  ${acc.padEnd(20)} ${bal.toFixed(2).padStart(12)} kr`);
