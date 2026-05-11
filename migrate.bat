@@ -120,9 +120,10 @@ echo   Traek CSV-filen ned i dette vindue, eller skriv stien manuelt.
 echo   Tryk Enter for at springe dette trin over ^(fx hvis du kun vil importere budget^).
 set "CSV_FILE="
 set /p "CSV_FILE=  Sti til CSV-fil [Enter = spring over]: "
-
-:: Fjern anfoerselstegn hvis filen er traekket ind
+:: Fjern anfoerselstegn
 set "CSV_FILE=!CSV_FILE:"=!"
+:: Spring normalisering over og gaa direkte videre hvis tomt
+if "!CSV_FILE!"=="" goto :csv_empty
 :: Konverter file://-URL til normal sti (naar filen traekkes ind fra Explorer i Windows Terminal)
 if "!CSV_FILE:~0,8!"=="file:///" set "CSV_FILE=!CSV_FILE:~8!"
 if "!CSV_FILE:~0,7!"=="file://" set "CSV_FILE=!CSV_FILE:~7!"
@@ -136,17 +137,16 @@ set "CSV_FILE=!CSV_FILE:%%2C=,!"
 set "CSV_FILE=!CSV_FILE:/=\!"
 :: Fjern evt. ledende/afsluttende mellemrum
 for /f "tokens=* delims= " %%a in ("!CSV_FILE!") do set "CSV_FILE=%%a"
-
-if not "!CSV_FILE!"=="" (
-    if not exist "!CSV_FILE!" (
-        echo   FEJL: Filen blev ikke fundet: !CSV_FILE!
-        pause
-        exit /b 1
-    )
-    echo   Fil valgt: !CSV_FILE!
-) else (
-    echo   Springer CSV-import over.
+if not exist "!CSV_FILE!" (
+    echo   FEJL: Filen blev ikke fundet: !CSV_FILE!
+    pause
+    exit /b 1
 )
+echo   Fil valgt: !CSV_FILE!
+goto :csv_done
+:csv_empty
+echo   Springer CSV-import over.
+:csv_done
 echo.
 
 :: --------------------------------------------------------
