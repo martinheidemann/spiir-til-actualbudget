@@ -21,6 +21,19 @@ if (typeof global.navigator === 'undefined') global.navigator = { platform: '', 
 if (typeof global.window === 'undefined') global.window = global;
 if (typeof global.location === 'undefined') global.location = { href: '', origin: '' };
 
+// --- Filtrer API-intern støj på stream-niveau ---
+function isApiNoise(s) {
+  return typeof s === 'string' && (
+    s.includes('[Breadcrumb]') ||
+    /Syncing since/i.test(s) ||
+    /Performing transaction reconciliation/i.test(s)
+  );
+}
+const _origStdoutWrite = process.stdout.write.bind(process.stdout);
+const _origStderrWrite = process.stderr.write.bind(process.stderr);
+process.stdout.write = (chunk, ...args) => isApiNoise(chunk) ? true : _origStdoutWrite(chunk, ...args);
+process.stderr.write = (chunk, ...args) => isApiNoise(chunk) ? true : _origStderrWrite(chunk, ...args);
+
 require('./_load-env.cjs');
 
 const api = require('@actual-app/api');
