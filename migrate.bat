@@ -81,11 +81,11 @@ if exist "%ENV_FILE%" (
     echo   Desktop App: download fra https://actualbudget.org/download
     echo               start den, saet et password, og brug URL: http://localhost:5006
     echo.
-    set /p "ACTUAL_SERVER_URL=  URL til Actual Budget [http://localhost:5006]: "
+    set /p ACTUAL_SERVER_URL=  URL til Actual Budget [http://localhost:5006]:
     if "!ACTUAL_SERVER_URL!"=="" set "ACTUAL_SERVER_URL=http://localhost:5006"
 
     echo.
-    set /p "ACTUAL_PASSWORD=  Password (det du satte i Actual Budget): "
+    set /p ACTUAL_PASSWORD=  Password (det du satte i Actual Budget):
     if "!ACTUAL_PASSWORD!"=="" (
         echo   FEJL: Password maa ikke vaere tomt.
         pause
@@ -119,7 +119,8 @@ echo.
 echo   Traek CSV-filen ned i dette vindue, eller skriv stien manuelt.
 echo   Tryk Enter for at springe dette trin over ^(fx hvis du kun vil importere budget^).
 set "CSV_FILE="
-set /p "CSV_FILE=  Sti til CSV-fil [Enter = spring over]: "
+set /p CSV_FILE=  Sti til CSV-fil [Enter = spring over]:
+if not defined CSV_FILE goto :csv_empty
 :: Fjern anfoerselstegn
 set CSV_FILE=!CSV_FILE:"=!
 :: Spring normalisering over og gaa direkte videre hvis tomt
@@ -196,38 +197,36 @@ echo   Har du downloadet dine budgetfiler fra Spiir?
 echo   (Spiir.dk ^> Eksporter ^> Eksporter budget for 2026/2027)
 echo.
 set "XLSX_2026="
-set /p "XLSX_2026=  Sti til 'Spiir Budget 2026.xlsx' (Enter = spring over): "
+set /p XLSX_2026=  Sti til 'Spiir Budget 2026.xlsx' (Enter = spring over):
+if not defined XLSX_2026 goto :xlsx26_skip
 set XLSX_2026=!XLSX_2026:"=!
 if "!XLSX_2026:~0,8!"=="file:///" set "XLSX_2026=!XLSX_2026:~8!"
 if "!XLSX_2026:~0,7!"=="file://" set "XLSX_2026=!XLSX_2026:~7!"
 set "XLSX_2026=!XLSX_2026:%%20= !"
 set "XLSX_2026=!XLSX_2026:/=\!"
-
-if not "!XLSX_2026!"=="" (
-    if exist "!XLSX_2026!" (
-        echo   Importerer budget for 2026...
-        node "%~dp0scripts\sync_budget.cjs" "!XLSX_2026!"
-    ) else (
-        echo   Filen blev ikke fundet: !XLSX_2026!
-    )
+if exist "!XLSX_2026!" (
+    echo   Importerer budget for 2026...
+    node "%~dp0scripts\sync_budget.cjs" "!XLSX_2026!"
+) else (
+    echo   Filen blev ikke fundet: !XLSX_2026!
 )
+:xlsx26_skip
 
 set "XLSX_2027="
-set /p "XLSX_2027=  Sti til 'Spiir Budget 2027.xlsx' (Enter = spring over): "
+set /p XLSX_2027=  Sti til 'Spiir Budget 2027.xlsx' (Enter = spring over):
+if not defined XLSX_2027 goto :xlsx27_skip
 set XLSX_2027=!XLSX_2027:"=!
 if "!XLSX_2027:~0,8!"=="file:///" set "XLSX_2027=!XLSX_2027:~8!"
 if "!XLSX_2027:~0,7!"=="file://" set "XLSX_2027=!XLSX_2027:~7!"
 set "XLSX_2027=!XLSX_2027:%%20= !"
 set "XLSX_2027=!XLSX_2027:/=\!"
-
-if not "!XLSX_2027!"=="" (
-    if exist "!XLSX_2027!" (
-        echo   Importerer budget for 2027...
-        node "%~dp0scripts\sync_budget.cjs" "!XLSX_2027!"
-    ) else (
-        echo   Filen blev ikke fundet: !XLSX_2027!
-    )
+if exist "!XLSX_2027!" (
+    echo   Importerer budget for 2027...
+    node "%~dp0scripts\sync_budget.cjs" "!XLSX_2027!"
+) else (
+    echo   Filen blev ikke fundet: !XLSX_2027!
 )
+:xlsx27_skip
 
 echo.
 echo ====================================================
