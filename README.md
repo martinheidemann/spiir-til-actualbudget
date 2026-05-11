@@ -22,7 +22,7 @@ Da Spiir annoncerede lukning begyndte jeg at kigge efter alternativer og faldt o
 
 Jeg har skiftet Actual Budget til at køre **transaktionelt** i stedet for envelope-baseret — det gøres under Indstillinger i Actual Budget og passer bedre til den måde jeg tænker økonomi på.
 
-Jeg håber disse scripts kan hjælpe andre Spiir-brugere godt på vej til et fortsat godt økonomisk overblik.
+Dette er et **hobbyprojekt** som jeg primært har lavet til mig selv, men med håb om at det kan være nyttigt for andre Spiir-brugere. Jeg har testet det på **Windows** og **Linux (WSL)**, men ikke alle scenarier — så der kan sagtens være edge cases jeg ikke har stødt på. Prøv gerne et par gange og tjek fejlfindingssektionen nedenfor hvis noget driller. Er du stadig sidder fast, er du velkommen til at skrive til mig på **[martinheide+actual@gmail.com](mailto:martinheide+actual@gmail.com)** — ingen garantier for svartid, men jeg hjælper gerne.
 
 ### Automatisk bankintegration
 
@@ -99,16 +99,18 @@ Du behøver kun gøre dette én gang.
 1. Dobbeltklik på filen **`migrate.bat`** i denne mappe
 2. Følg instruktionerne i det sorte vindue der åbner sig
 
-**Mac: (IKKE TESTET)**
+**Mac: (ikke testet)**
 
 1. Åbn Terminal (søg efter "Terminal" i Spotlight)
 2. Skriv `bash ` og træk derefter filen **`migrate.sh`** ind i Terminal-vinduet
 3. Tryk Enter og følg instruktionerne
 
-**Linux: (IKKE TESTET)**
+**Linux / WSL:**
 
 1. Åbn en terminal i denne mappe
 2. Kør: `bash migrate.sh`
+
+> **WSL-brugere:** Sørg for at `npm install` er kørt inde fra WSL-terminalen, ikke fra Windows — native Node.js-moduler skal kompileres til det rigtige OS.
 
 Programmet spørger om:
 
@@ -199,6 +201,9 @@ Budgettet kan være kommet i en korrupt tilstand. Slet det i Actual Budget UI og
 **Kategorier fra Excel matcher ikke**
 Kør `sync_budget.cjs --dry-run` for at se hvilke navne der ikke matchede. Tjek at kategorien findes i Actual Budget under præcis det navn Excel bruger.
 
+**Noget andet driller?**
+Prøv et par gange og tjek fejlbeskeden grundigt. Virker det stadig ikke, er du velkommen til at skrive til **[martinheide+actual@gmail.com](mailto:martinheide+actual@gmail.com)**. Ingen garantier for svartid, men jeg hjælper gerne.
+
 ---
 
 ## Avanceret brug
@@ -223,7 +228,7 @@ ACTUAL_PASSWORD=dit-server-password
 
 ---
 
-_Lavet af Martin Heidemann — Spiir-bruger siden 2010. Til alle der skal finde et nyt hjem til deres økonomi._
+_Lavet af Martin Heidemann — Spiir-bruger siden 2010. Hobbyprojekt lavet til mig selv, med håb om at det kan bruges af andre. Testet på Windows og Linux (WSL). Spørgsmål: [martinheide+actual@gmail.com](mailto:martinheide+actual@gmail.com)_
 
 ---
 
