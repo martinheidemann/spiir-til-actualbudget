@@ -147,6 +147,7 @@ if not exist "!CSV_FILE!" (
 echo   Fil valgt: !CSV_FILE!
 goto :csv_done
 :csv_empty
+set "CSV_FILE="
 echo   Springer CSV-import over.
 :csv_done
 echo.
