@@ -166,7 +166,8 @@ async function main() {
     ignoredDuplicates: 0,
     ignoredKept: 0,
     udlaeg: 0,
-    splits: 0,
+    splitParentsSkipped: 0,
+    splitChildren: 0,
   };
   // Til API: { accountName: [transaction, ...] }
   const toImport = new Map();
@@ -174,6 +175,10 @@ async function main() {
 
   for (const t of txs) {
     if (processed.has(t.Id)) continue;
+
+    // Split-forældre: SplitGroupId peger på sin egen Id — skip dem,
+    // børnene (med de reelle kategorier og beløb) importeres i stedet.
+    if (t.SplitGroupId && t.SplitGroupId === t.Id) { stats.splitParentsSkipped++; continue; }
 
     const isKontooverforsel = t.CategoryName === 'Kontooverførsel';
     const isIgnorer = t.CategoryName === 'Ignorer';
@@ -224,7 +229,7 @@ async function main() {
       stats.udlaeg++;
       t.__targetCategory = 'Udlæg';
     }
-    if (t.SplitGroupId) stats.splits++;
+    if (t.SplitGroupId) stats.splitChildren++;
     stats.regular++;
 
     if (!toImport.has(t.AccountName)) toImport.set(t.AccountName, []);
@@ -234,8 +239,9 @@ async function main() {
   print(`Klassificering:`);
   print(`  Regulære transaktioner:    ${stats.regular}`);
   print(`     heraf udlæg:             ${stats.udlaeg}`);
-  print(`     heraf split-poster:      ${stats.splits}`);
+  print(`     heraf split-børn:        ${stats.splitChildren}`);
   print(`     heraf bevarede Ignorer:  ${stats.ignoredKept}`);
+  print(`  Split-forældre sprunget:   ${stats.splitParentsSkipped} (kun børn importeres)`);
   print(`  Matchede overførsler (par): ${stats.matchedTransfers}`);
   print(`  Ikke-matchede overf.:       ${stats.unmatchedTransfers} (sprunget over)`);
   print(`  Ignorer-dubletter:          ${stats.ignoredDuplicates} (sprunget over)\n`);
