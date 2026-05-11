@@ -67,16 +67,23 @@ function toActualAmount(kr) {
 }
 
 // --- Undertrykker API'ets interne console-spam (ignored: true, Syncing since, osv.) ---
-const _origLog = console.log.bind(console);
-const _origWarn = console.warn.bind(console);
-function print(...args) { _origLog(...args); }
+const _origLog   = console.log.bind(console);
+const _origWarn  = console.warn.bind(console);
+const _origError = console.error.bind(console);
+function print(...args)    { _origLog(...args); }
+function printerr(...args) { _origError(...args); }
 
 /** Kør en async API-funktion uden interne log-beskeder fra @actual-app/api */
 async function quietly(fn) {
-  console.log = () => {};
-  console.warn = () => {};
+  console.log = () => {}; console.warn = () => {}; console.error = () => {};
   try { return await fn(); }
-  finally { console.log = _origLog; console.warn = _origWarn; }
+  finally { console.log = _origLog; console.warn = _origWarn; console.error = _origError; }
+}
+
+/** Undertrykk alle tre console-metoder permanent (bruges efter API-forbindelsen er oppe,
+ *  så asynkrone baggrundscallbacks ikke kan lække igennem mellem quietly()-kald). */
+function silenceForever() {
+  console.log = () => {}; console.warn = () => {}; console.error = () => {};
 }
 
 /** Vis en progress-bar på én linje (overskriver sig selv med \r) */
@@ -254,6 +261,8 @@ async function main() {
   const budget = budgets[0];
   print(`Henter budget: ${budget.name}\n`);
   await quietly(() => api.downloadBudget(budget.groupId));
+  // Permanent suppression — asynkrone API-callbacks kan ikke lække igennem herefter
+  silenceForever();
 
   // --- Opret/find konti ---
   print('Opretter konti (hvis ikke eksisterer)...');
@@ -376,7 +385,7 @@ async function main() {
       updated += result.updated?.length || 0;
       // Tving sync til serveren mellem hver batch
       try { await quietly(() => api.sync()); }
-      catch (e) { process.stdout.write('\n'); _origWarn(`  Sync-advarsel: ${e.message}`); }
+      catch (e) { process.stdout.write('\n'); printerr(`  Sync-advarsel: ${e.message}`); }
     }
     showProgress(accName, list.length, list.length);
     process.stdout.write('\n');
@@ -401,7 +410,7 @@ async function main() {
         await quietly(() => api.updateTransaction(t.id, { cleared: true }));
       }
       try { await quietly(() => api.sync()); }
-      catch (e) { process.stdout.write('\n'); _origWarn(`  Sync-advarsel: ${e.message}`); }
+      catch (e) { process.stdout.write('\n'); printerr(`  Sync-advarsel: ${e.message}`); }
     }
     showProgress(accName, uncleared.length, uncleared.length);
     process.stdout.write('\n');
@@ -417,13 +426,13 @@ async function main() {
 main().catch(async err => {
   // Vis fejltype og reason hvis det er en sync/PostError
   const reason = err.reason || err.type || '';
-  console.error('\nFejl:', err.message || '(ingen besked)');
-  if (reason) console.error('Årsag:', reason);
-  console.error(err.stack);
+  printerr('\nFejl:', err.message || '(ingen besked)');
+  if (reason) printerr('Årsag:', reason);
+  printerr(err.stack);
   if (reason === 'network-failure' || err.message?.includes('network-failure')) {
-    console.error('\nTip: Actual Budget serveren afviste sync-kaldet (network-failure).');
-    console.error('     Prøv at køre scriptet igen — det er idempotent og fortsætter fra der af.');
-    console.error('     Hvis fejlen gentager sig: slet budgettet i Actual Budget UI og start forfra.');
+    printerr('\nTip: Actual Budget serveren afviste sync-kaldet (network-failure).');
+    printerr('     Prøv at køre scriptet igen — det er idempotent og fortsætter fra der af.');
+    printerr('     Hvis fejlen gentager sig: slet budgettet i Actual Budget UI og start forfra.');
   }
   try { await api.shutdown(); } catch {}
   process.exit(1);
