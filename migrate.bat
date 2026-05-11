@@ -117,10 +117,13 @@ echo   2. Klik pa dit navn oeverst til hoeire
 echo   3. Vaelg "Eksporter data" og hent CSV-filen
 echo.
 echo   Traek CSV-filen ned i dette vindue, eller skriv stien manuelt.
-echo   Tryk Enter for at springe dette trin over ^(fx hvis du kun vil importere budget^).
-set "CSV_FILE="
-for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "Read-Host"`) do set "CSV_FILE=%%i"
-:: Fjern anfoerselstegn og spring over hvis tomt
+echo   Tryk Enter for at springe dette trin over.
+echo.
+set "CSV_FILE=__SKIP__"
+set /p CSV_FILE=
+if "!CSV_FILE!"=="__SKIP__" goto :csv_empty
+if "!CSV_FILE!"=="" goto :csv_empty
+:: Fjern anfoerselstegn
 set CSV_FILE=!CSV_FILE:"=!
 if "!CSV_FILE!"=="" goto :csv_empty
 :: Konverter file://-URL til normal sti (naar filen traekkes ind fra Explorer i Windows Terminal)
@@ -194,10 +197,12 @@ echo.
 echo   Har du downloadet dine budgetfiler fra Spiir?
 echo   (Spiir.dk ^> Eksporter ^> Eksporter budget for 2026/2027)
 echo.
-set "XLSX_2026="
-for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "Read-Host"`) do set "XLSX_2026=%%i"
-set XLSX_2026=!XLSX_2026:"=!
+echo   Sti til 'Spiir Budget 2026.xlsx' (Enter = spring over):
+set "XLSX_2026=__SKIP__"
+set /p XLSX_2026=
+if "!XLSX_2026!"=="__SKIP__" goto :xlsx26_skip
 if "!XLSX_2026!"=="" goto :xlsx26_skip
+set XLSX_2026=!XLSX_2026:"=!
 if "!XLSX_2026:~0,8!"=="file:///" set "XLSX_2026=!XLSX_2026:~8!"
 if "!XLSX_2026:~0,7!"=="file://" set "XLSX_2026=!XLSX_2026:~7!"
 set "XLSX_2026=!XLSX_2026:%%20= !"
@@ -210,10 +215,12 @@ if exist "!XLSX_2026!" (
 )
 :xlsx26_skip
 
-set "XLSX_2027="
-for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "Read-Host"`) do set "XLSX_2027=%%i"
-set XLSX_2027=!XLSX_2027:"=!
+echo   Sti til 'Spiir Budget 2027.xlsx' (Enter = spring over):
+set "XLSX_2027=__SKIP__"
+set /p XLSX_2027=
+if "!XLSX_2027!"=="__SKIP__" goto :xlsx27_skip
 if "!XLSX_2027!"=="" goto :xlsx27_skip
+set XLSX_2027=!XLSX_2027:"=!
 if "!XLSX_2027:~0,8!"=="file:///" set "XLSX_2027=!XLSX_2027:~8!"
 if "!XLSX_2027:~0,7!"=="file://" set "XLSX_2027=!XLSX_2027:~7!"
 set "XLSX_2027=!XLSX_2027:%%20= !"
