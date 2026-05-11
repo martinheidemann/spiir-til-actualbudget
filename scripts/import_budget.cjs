@@ -75,9 +75,10 @@ function printerr(...args) { _origError(...args); }
 
 /** Kør en async API-funktion uden interne log-beskeder fra @actual-app/api */
 async function quietly(fn) {
+  const prevLog = console.log, prevWarn = console.warn, prevError = console.error;
   console.log = () => {}; console.warn = () => {}; console.error = () => {};
   try { return await fn(); }
-  finally { console.log = _origLog; console.warn = _origWarn; console.error = _origError; }
+  finally { console.log = prevLog; console.warn = prevWarn; console.error = prevError; }
 }
 
 /** Undertrykk alle tre console-metoder permanent (bruges efter API-forbindelsen er oppe,
