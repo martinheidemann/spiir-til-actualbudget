@@ -233,10 +233,20 @@ async function main() {
   const year = yearFromFilename(XLSX_FILE);
   console.log(`Årstal detekteret: ${year}\n`);
 
-  // Summér beløb pr. (kategori, måned)
-  const budgetMap = new Map(); // "catName|||month" → sumDKK
+  // --- Indlæs budget-mapping.json (valgfrit) ---
+  const MAPPING_FILE = path.join(__dirname, 'budget-mapping.json');
+  let mappingLower = new Map();
+  if (fs.existsSync(MAPPING_FILE)) {
+    const raw = JSON.parse(fs.readFileSync(MAPPING_FILE, 'utf8'));
+    mappingLower = new Map(Object.entries(raw).map(([k, v]) => [k.toLowerCase(), v]));
+    if (mappingLower.size > 0) console.log(`Mapping-fil: ${mappingLower.size} aliaser indlæst\n`);
+  }
+
+  // Summér beløb pr. (kategori, måned) — anvend evt. mapping
+  const budgetMap = new Map(); // "resolvedCatName|||month" → sumDKK
   for (const { categoryName, monthIndex, amountDKK } of entries) {
-    const key = `${categoryName}|||${toActualMonth(year, monthIndex)}`;
+    const resolvedName = mappingLower.get(categoryName.toLowerCase()) || categoryName;
+    const key = `${resolvedName}|||${toActualMonth(year, monthIndex)}`;
     budgetMap.set(key, (budgetMap.get(key) || 0) + amountDKK);
   }
 
