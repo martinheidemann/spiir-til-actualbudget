@@ -81,7 +81,16 @@ Gem alle filer et sted du nemt kan finde dem igen.
 
 ---
 
-### Trin 3 — Installér Node.js
+### Trin 3 — Hent dette program
+
+1. Gå til **https://github.com/martinheidemann/spiir-til-actualbudget/releases/latest**
+2. Under **"Assets"**, klik på **`Source code (zip)`**
+3. Pak ZIP-filen ud et sted du nemt kan finde den igen — fx på Skrivebordet eller i Dokumenter
+4. Du får en mappe der hedder noget i stil med `spiir-til-actualbudget-1.0.0`
+
+---
+
+### Trin 4 — Installér Node.js
 
 1. Gå til **https://nodejs.org/en/download**
 2. Klik på den grønne **"LTS"**-knap (Long Term Support)
@@ -92,7 +101,7 @@ Du behøver kun gøre dette én gang.
 
 ---
 
-### Trin 4 — Kør migreringen
+### Trin 5 — Kør migreringen
 
 **Windows:**
 
@@ -117,12 +126,13 @@ Programmet spørger om:
 - **URL til Actual Budget** — brug `http://localhost:5006` hvis du bruger Desktop App
 - **Password** — det du satte i Trin 1
 - **Stien til din Spiir CSV-fil** — fra Trin 2
+- Du kan trykke Enter for at springe CSV-import over og kun importere Excel-budget
 
 Importen tager **5–20 minutter** afhængigt af antallet af konti og størrelsen af din transaktionshistorik. Luk ikke vinduet imens.
 
 ---
 
-### Trin 5 (valgfrit) — Importér dit Excel-budget
+### Trin 6 (valgfrit) — Importér dit Excel-budget
 
 Har du downloadet dit budget fra Spiir som Excel-fil? Du kan importere budgetbeløbene til Actual Budget:
 
