@@ -158,30 +158,44 @@ fi
 # --------------------------------------------------------
 # Trin 6 (valgfrit): Excel-budgetimport
 # --------------------------------------------------------
-echo "[Trin 6/6] Excel-budget (valgfrit)..."
+echo ""
+echo "===================================================="
+echo "[Trin 6/6] Excel-budget (valgfrit)"
+echo "===================================================="
 echo ""
 echo "  Har du downloadet dine budgetfiler fra Spiir?"
 echo "  (spiir.dk → Eksporter → Eksporter budget for 2026/2027)"
 echo ""
-
-read -r -p "  Sti til 'Spiir Budget 2026.xlsx' (Enter = spring over): " XLSX_2026
+echo "  Træk filen ind i vinduet eller skriv stien."
+echo "  Tryk Enter for at springe over."
+echo ""
+echo "  Sti til 'Spiir Budget 2026.xlsx':"
+read -r XLSX_2026
 XLSX_2026="${XLSX_2026//\"/}"
-XLSX_2026="$(echo "$XLSX_2026" | xargs)"
+XLSX_2026="$(echo "$XLSX_2026" | xargs 2>/dev/null || echo "")"
 if [ -n "$XLSX_2026" ]; then
     if [ -f "$XLSX_2026" ]; then
+        echo ""
         echo "  Importerer budget for 2026..."
+        echo ""
         node "$SCRIPT_DIR/scripts/sync_budget.cjs" "$XLSX_2026"
     else
         echo "  Filen blev ikke fundet: $XLSX_2026"
     fi
 fi
 
-read -r -p "  Sti til 'Spiir Budget 2027.xlsx' (Enter = spring over): " XLSX_2027
+echo ""
+echo "----------------------------------------------------"
+echo ""
+echo "  Sti til 'Spiir Budget 2027.xlsx':"
+read -r XLSX_2027
 XLSX_2027="${XLSX_2027//\"/}"
-XLSX_2027="$(echo "$XLSX_2027" | xargs)"
+XLSX_2027="$(echo "$XLSX_2027" | xargs 2>/dev/null || echo "")"
 if [ -n "$XLSX_2027" ]; then
     if [ -f "$XLSX_2027" ]; then
+        echo ""
         echo "  Importerer budget for 2027..."
+        echo ""
         node "$SCRIPT_DIR/scripts/sync_budget.cjs" "$XLSX_2027"
     else
         echo "  Filen blev ikke fundet: $XLSX_2027"

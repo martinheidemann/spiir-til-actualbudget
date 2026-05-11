@@ -193,12 +193,18 @@ if not "!CSV_FILE!"=="" (
 :: --------------------------------------------------------
 :: Trin 6 (valgfrit): Excel-budgetimport
 :: --------------------------------------------------------
-echo [Trin 6/6] Excel-budget (valgfrit)...
+echo.
+echo ====================================================
+echo [Trin 6/6] Excel-budget ^(valgfrit^)
+echo ====================================================
 echo.
 echo   Har du downloadet dine budgetfiler fra Spiir?
 echo   (Spiir.dk ^> Eksporter ^> Eksporter budget for 2026/2027)
 echo.
-echo   Sti til 'Spiir Budget 2026.xlsx' (Enter = spring over):
+echo   Traek filen ind i vinduet eller skriv stien.
+echo   Tryk Enter for at springe over.
+echo.
+echo   Sti til 'Spiir Budget 2026.xlsx':
 set "XLSX_2026=__SKIP__"
 set /p XLSX_2026=
 if "!XLSX_2026!"=="__SKIP__" goto :xlsx26_skip
@@ -209,14 +215,19 @@ if "!XLSX_2026:~0,7!"=="file://" set "XLSX_2026=!XLSX_2026:~7!"
 set "XLSX_2026=!XLSX_2026:%%20= !"
 set "XLSX_2026=!XLSX_2026:/=\!"
 if exist "!XLSX_2026!" (
+    echo.
     echo   Importerer budget for 2026...
+    echo.
     node "%~dp0scripts\sync_budget.cjs" "!XLSX_2026!"
 ) else (
     echo   Filen blev ikke fundet: !XLSX_2026!
 )
 :xlsx26_skip
 
-echo   Sti til 'Spiir Budget 2027.xlsx' (Enter = spring over):
+echo.
+echo ----------------------------------------------------
+echo.
+echo   Sti til 'Spiir Budget 2027.xlsx':
 set "XLSX_2027=__SKIP__"
 set /p XLSX_2027=
 if "!XLSX_2027!"=="__SKIP__" goto :xlsx27_skip
@@ -227,7 +238,9 @@ if "!XLSX_2027:~0,7!"=="file://" set "XLSX_2027=!XLSX_2027:~7!"
 set "XLSX_2027=!XLSX_2027:%%20= !"
 set "XLSX_2027=!XLSX_2027:/=\!"
 if exist "!XLSX_2027!" (
+    echo.
     echo   Importerer budget for 2027...
+    echo.
     node "%~dp0scripts\sync_budget.cjs" "!XLSX_2027!"
 ) else (
     echo   Filen blev ikke fundet: !XLSX_2027!
