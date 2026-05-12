@@ -132,25 +132,15 @@ async function main() {
     arr.sort((a, b) => toIsoDate(a.Date).localeCompare(toIsoDate(b.Date)));
   }
 
-  // --- Beregn slutsaldo pr. konto (fra sidste postering) ---
-  // Åbningssaldo beregnes baglæns nedenfor, efter klassificering er afsluttet.
-  const closingBalances = new Map();
-  for (const [acc, arr] of byAccount) {
-    if (arr.length === 0) continue;
-    closingBalances.set(acc, parseDanishAmount(arr[arr.length - 1].Balance));
-  }
-
   // --- Byg lookup: Spiir Id → transaktion (til transfer-matching) ---
   const byId = new Map();
   for (const t of txs) byId.set(t.Id, t);
 
-  // --- Duplikat-detektion til Ignorer-poster ---
+  // --- Duplikat-detektion (kører før closing-balance-beregningen, så
+  //     chain-walken kan filtrere dubletter ud). ---
   // I tidlige Spiir-importer kunne samme bankpostering komme med to gange,
   // og brugeren markerede den ene som "Ignorer" manuelt. Disse skal skippes.
-  // Nøgle: konto + dato + beløb + beskrivelse → liste af tx'er
-  // Balance medtages i nøglen: en reel postering ændrer altid balancen,
-  // så to rækker med samme balance er en ægte dublet — to rækker med
-  // forskellig balance er to legitime posteringer der tilfældigvis ligner hinanden.
+  // Balance medtages i nøglen: en reel postering ændrer altid balancen.
   const dupKey = (t) => [
     t.AccountId,
     t.Date,
@@ -164,9 +154,6 @@ async function main() {
     if (!byDupKey.has(k)) byDupKey.set(k, []);
     byDupKey.get(k).push(t);
   }
-
-  // --- Deduplikering: for hvert (konto+dato+beløb+beskrivelse)-sæt beholdes kun én post ---
-  // Prioritering: ikke-Ignorer > Ignorer, derefter laveste Id (deterministisk).
   const skipIds = new Set();
   for (const [, group] of byDupKey) {
     if (group.length <= 1) continue;
@@ -179,13 +166,8 @@ async function main() {
     for (let i = 1; i < sorted.length; i++) skipIds.add(sorted[i].Id);
   }
 
-  // --- Ekstra deduplikering af Kontooverførsel (uden Balance i nøglen) ---
-  // Transfer-dubletter kan have forskellig Balance end hinanden (begge posteringer
-  // registreres med den reelle saldo på afsendetidspunktet, men kun én er bankens
-  // egentlige bevægelse). De fanges ikke af den normal Balance-inkluderende dupKey,
-  // og ender ellers i listen over ikke-matchede overførsler.
-  // Vi kører et separat pas med 4-felts nøgle (AccountId+Dato+Beløb+Beskrivelse)
-  // kun for Kontooverførsel-rækker, og markerer alle-undtagen-én (laveste Id) til skip.
+  // Ekstra deduplikering af Kontooverførsel (uden Balance i nøglen) — transfer-
+  // dubletter kan have forskellig Balance end hinanden, men kun én er reel.
   const transferDupKey = (t) => [
     t.AccountId,
     t.Date,
@@ -195,7 +177,7 @@ async function main() {
   const byTransferDupKey = new Map();
   for (const t of txs) {
     if (t.CategoryName !== 'Kontooverførsel') continue;
-    if (skipIds.has(t.Id)) continue; // allerede håndteret
+    if (skipIds.has(t.Id)) continue;
     const k = transferDupKey(t);
     if (!byTransferDupKey.has(k)) byTransferDupKey.set(k, []);
     byTransferDupKey.get(k).push(t);
@@ -205,6 +187,98 @@ async function main() {
     if (group.length <= 1) continue;
     const sorted = [...group].sort((a, b) => (a.Id < b.Id ? -1 : 1));
     for (let i = 1; i < sorted.length; i++) transferSkipIds.add(sorted[i].Id);
+  }
+
+  // --- Beregn slutsaldo pr. konto via forward dag-for-dag kædning ---
+  // Spiirs CSV har samme-dato-rækker i ukonsistent rækkefølge. Vi kan ikke stole på
+  // "CSV's sidste række" som slutsaldo. I stedet walk'er vi forward dag for dag:
+  // For hver dag bestemmer vi start-saldo (= forrige dags slut-saldo), kæder dagens
+  // rækker forward via Balance→Amount, og bruger den endelige saldo som dagens slut.
+  // Den allersidste dags slut = closing for kontoen.
+  //
+  // Vi filtrerer dubletter ud — de optræder med samme (eller korrupt) Balance i CSV
+  // men bankens egentlige kæde har dem kun ÉN gang.
+  //
+  // For første dag (ingen forrige slut at læne sig op ad) bestemmes start ved chain-
+  // start detektion: rækken hvis "balance før" (= Balance − Amount) ikke optræder som
+  // nogen anden rækkes Balance i dagen. Hvis tvetydig, fallback til CSV's første række.
+  function computeChronologicalEnd(arr) {
+    const groups = new Map();
+    for (const t of arr) {
+      if (!groups.has(t.Date)) groups.set(t.Date, []);
+      groups.get(t.Date).push(t);
+    }
+    const datesAsc = [...groups.keys()].sort((a, b) =>
+      toIsoDate(a).localeCompare(toIsoDate(b)));
+
+    let prevEnd = null;
+    for (const date of datesAsc) {
+      const group = groups.get(date);
+      const withBal = group.filter(t => {
+        const isSplitParent = t.SplitGroupId && t.SplitGroupId === t.Id;
+        return !isSplitParent && t.Balance
+          && !skipIds.has(t.Id) && !transferSkipIds.has(t.Id);
+      });
+      if (withBal.length === 0) continue;
+
+      // Find start-of-day balance
+      let startBal;
+      if (prevEnd !== null) {
+        startBal = prevEnd;
+      } else {
+        // First day: detect chain-start (row whose balance_before isn't anyone's Balance)
+        const balanceSet = new Set(withBal.map(t =>
+          parseDanishAmount(t.Balance).toFixed(2)));
+        const starts = withBal.filter(t => {
+          const before = parseDanishAmount(t.Balance) - parseDanishAmount(t.Amount);
+          return !balanceSet.has(before.toFixed(2));
+        });
+        if (starts.length === 1) {
+          startBal = parseDanishAmount(starts[0].Balance) - parseDanishAmount(starts[0].Amount);
+        } else {
+          // Ambiguous (or empty) — use first CSV row's balance_before as best guess
+          startBal = parseDanishAmount(withBal[0].Balance) - parseDanishAmount(withBal[0].Amount);
+        }
+      }
+
+      // Chain forward from startBal through the day
+      let curBal = startBal;
+      const used = new Set();
+      while (used.size < withBal.length) {
+        const next = withBal.find(t => {
+          if (used.has(t.Id)) return false;
+          const before = parseDanishAmount(t.Balance) - parseDanishAmount(t.Amount);
+          return Math.abs(before - curBal) <= 0.01;
+        });
+        if (!next) break; // Chain broken
+        curBal = parseDanishAmount(next.Balance);
+        used.add(next.Id);
+      }
+
+      if (used.size === withBal.length) {
+        // Chain completed successfully
+        prevEnd = curBal;
+      } else {
+        // Chain broken — fallback to a Balance that's not anyone's balance_before
+        const beforeBalances = new Set(withBal.map(t =>
+          (parseDanishAmount(t.Balance) - parseDanishAmount(t.Amount)).toFixed(2)));
+        const endCands = withBal.filter(t =>
+          !beforeBalances.has(parseDanishAmount(t.Balance).toFixed(2)));
+        if (endCands.length === 1) {
+          prevEnd = parseDanishAmount(endCands[0].Balance);
+        } else {
+          // Total fallback: CSV-last row's Balance
+          prevEnd = parseDanishAmount(withBal[withBal.length - 1].Balance);
+        }
+      }
+    }
+    return prevEnd ?? 0;
+  }
+
+  const closingBalances = new Map();
+  for (const [acc, arr] of byAccount) {
+    if (arr.length === 0) continue;
+    closingBalances.set(acc, computeChronologicalEnd(arr));
   }
 
   // --- Klassificér transaktioner ---
@@ -222,12 +296,16 @@ async function main() {
     udlaeg: 0,
     splitParentsSkipped: 0,
     splitChildren: 0,
+    oneSidedTransfers: 0,
+    externalTransfers: 0,
   };
   const skippedUnmatched = [];
   const skippedDuplicates = [];
   // Til API: { accountName: [transaction, ...] }
   const toImport = new Map();
-  const transferPairs = []; // {fromAccount, toAccount, fromTx, toTx}
+  const transferPairs = []; // {fromTx, toTx}
+  const oneSidedTransfers = []; // {tx, targetAcc} — CSV har kun én side
+  const externalTransferIds = new Set(); // Kontooverørsel-rækker omklassificeret til regulær Ignoreret
 
   for (const t of txs) {
     if (processed.has(t.Id)) continue;
@@ -356,6 +434,49 @@ async function main() {
     }
   }
 
+  // --- Tredje overførsels-pas: klassificér tilbageværende skippedUnmatched ---
+  // De har hverken CounterEntryId-match (1. pas) eller en modpart i skippedUnmatched (2. pas).
+  //
+  //  A) Beskrivelsen nævner et kendt kontonavn:
+  //     → Ensidet overørsel (én side mangler i CSV). Opret som rigtig Actual Budget-transfer;
+  //       Actual auto-opretter modtagersiden. Åbningssaldo for afsender-kontoen justeres.
+  //
+  //  B) Beskrivelsen nævner intet kendt kontonavn (Juniorkonto, ekstern bank osv.):
+  //     → Importér som regulær postering med kategori "Ignoreret".
+  {
+    const knownAccNames = [...byAccount.keys()];
+    const toProcess = [...skippedUnmatched];
+    skippedUnmatched.length = 0; // tøm — vi håndterer dem herunder
+
+    for (const t of toProcess) {
+      const desc = (t.Description || t.OriginalDescription || '').toLowerCase().trim();
+      let targetAcc = null;
+      for (const accName of knownAccNames) {
+        if (accName.toLowerCase() !== t.AccountName.toLowerCase()
+            && desc.includes(accName.toLowerCase())) {
+          targetAcc = accName;
+          break;
+        }
+      }
+
+      if (targetAcc) {
+        // A: ensidet overørsel til/fra kendt konto
+        oneSidedTransfers.push({ tx: t, targetAcc });
+        stats.oneSidedTransfers++;
+        stats.unmatchedTransfers--;
+      } else {
+        // B: ekstern/ukendt destination → importér som regulær postering
+        t.__targetCategory = 'Ignoreret';
+        if (!toImport.has(t.AccountName)) toImport.set(t.AccountName, []);
+        toImport.get(t.AccountName).push(t);
+        externalTransferIds.add(t.Id);
+        stats.externalTransfers++;
+        stats.regular++;
+        stats.unmatchedTransfers--;
+      }
+    }
+  }
+
   // --- Beregn åbningssaldi baglæns fra slutsaldo ---
   // Garanterer at Actual Budget slutsaldo altid er korrekt, uanset om der er
   // oversprungne overførsler. Åbningssaldoen absorberer de manglende beløb.
@@ -375,42 +496,93 @@ async function main() {
       if (fromTx.AccountName === acc) transferSum += parseDanishAmount(fromTx.Amount);
       if (toTx.AccountName   === acc) transferSum += parseDanishAmount(toTx.Amount);
     }
+    // Ensidede overørsler: BEGGE sider justeres.
+    // Afsender-kontoen (med CSV-rækken): tx.Amount er negativt → reducerer saldoen.
+    // Modtager-kontoen (targetAcc): Actual auto-opretter en syntetisk +Amount transaktion.
+    // Den transaktion er ikke i CSV, men er reel og vil påvirke saldoen i Actual Budget.
+    // Vi skal derfor reducere åbningssaldoen med dette syntetiske beløb, så slutsaldoen
+    // stadig passer: opening = closing − regularSum − transferSum − syntheticCredit.
+    for (const { tx, targetAcc } of oneSidedTransfers) {
+      if (tx.AccountName === acc) transferSum += parseDanishAmount(tx.Amount);
+      // targetAcc modtager det modsatte beløb syntetisk, f.eks. tx.Amount=-5500 → +5500 på targetAcc
+      if (targetAcc === acc) transferSum -= parseDanishAmount(tx.Amount);
+    }
     openingBalances.set(acc, closing - regularSum - transferSum);
   }
 
-  // --- Beregn divergensdato pr. konto ---
-  // Gå posteringer igennem kronologisk og find første dato hvor den løbende
-  // beregnede balance afviger fra CSV-feltet Balance (reel banksaldo).
-  // Split-forældre springes over (børnene importeres og summerer til samme nettobeløb).
-  // Split-børn har tomt Balance-felt og springes over i check, men bidrager til runBal.
+  // --- Beregn pålidelighedsdato pr. konto (baglæns CSV-walk) ---
+  // Vi starter fra nyeste transaktion (slutsaldo) og går baglæns gennem CSV.
+  // For hver DAG beregner vi expected (balance ved start af dagen) ved at trække
+  // dagens samlede Amount fra forrige dags slut-balance, og verificerer at expected
+  // matcher mindst én af CSV-rækkernes Balance på den dato. Vi grupperer per dag fordi
+  // samme-dato-rækker i CSV ikke nødvendigvis er i kronologisk rækkefølge inden for
+  // dagen (eksempel: Spiir kan liste -8479 før +7429 selvom +7429 skete kronologisk
+  // først). Første dag (gående bagud) hvor expected ikke matcher nogen Balance i
+  // dagsgruppen markerer divergensen — alt fra dén dag og fremad er pålideligt.
+  //
+  // Synthetic-overførsler (modtagersiden af ensidede overf.) er IKKE i CSV;
+  // hvis de mangler, dukker divergensen op netop på den dato hvor den manglende
+  // kredit skulle have ramt kontoen — præcis den information vi vil vise brugeren.
   const matchedTransferIds = new Set(
     transferPairs.flatMap(p => [p.fromTx.Id, p.toTx.Id])
   );
-  const divergenceDates = new Map(); // acc → ISO-dato (første afvigelse) eller undef
+  const oneSidedTransferTxIds = new Set(oneSidedTransfers.map(({ tx }) => tx.Id));
+  const reliableSinceDates = new Map(); // acc → ISO-dato (tidligste pålidelige) eller null
 
   for (const [acc, arr] of byAccount) {
-    let runBal = openingBalances.get(acc) ?? 0;
-    let divDate;
+    let expected = closingBalances.get(acc) ?? 0;
+    let lastReliableDate = null;
+    let foundDivergence = false;
 
+    // Gruppér rækker pr. dato (arr er allerede sorteret kronologisk på dato)
+    const groups = new Map();
     for (const t of arr) {
-      const isSplitParent = t.SplitGroupId && t.SplitGroupId === t.Id;
+      if (!groups.has(t.Date)) groups.set(t.Date, []);
+      groups.get(t.Date).push(t);
+    }
+    const datesDesc = [...groups.keys()].sort((a, b) =>
+      toIsoDate(b).localeCompare(toIsoDate(a)));
 
-      // Bidrager denne postering til saldoen i Actual Budget?
-      const contributed = !isSplitParent
-        && !skipIds.has(t.Id)
-        && !transferSkipIds.has(t.Id)
-        && (t.CategoryName !== 'Kontooverførsel' || matchedTransferIds.has(t.Id));
+    for (const date of datesDesc) {
+      const group = groups.get(date);
 
-      if (contributed) runBal += parseDanishAmount(t.Amount);
-
-      // Check: kun rækker med Balance-felt, ikke split-forældre
-      if (!isSplitParent && t.Balance && divDate === undefined) {
-        const csvBal = parseDanishAmount(t.Balance);
-        if (Math.abs(runBal - csvBal) > 0.01) divDate = toIsoDate(t.Date);
+      // Tjek: matcher expected mindst én Balance-værdi i dagsgruppen?
+      if (!foundDivergence) {
+        const dayBalances = [];
+        for (const t of group) {
+          const isSplitParent = t.SplitGroupId && t.SplitGroupId === t.Id;
+          if (!isSplitParent && t.Balance && !skipIds.has(t.Id) && !transferSkipIds.has(t.Id)) {
+            dayBalances.push(parseDanishAmount(t.Balance));
+          }
+        }
+        if (dayBalances.length > 0) {
+          const matched = dayBalances.some(b => Math.abs(b - expected) <= 0.01);
+          if (matched) {
+            lastReliableDate = toIsoDate(date);
+          } else {
+            foundDivergence = true;
+          }
+        }
+        // Hvis ingen Balance-værdier i dagen (kun split-børn), springes check over
       }
+
+      // Walk back: træk summen af dagens contributed Amounts fra expected
+      let dayAmount = 0;
+      for (const t of group) {
+        const isSplitParent = t.SplitGroupId && t.SplitGroupId === t.Id;
+        const contributed = !isSplitParent
+          && !skipIds.has(t.Id)
+          && !transferSkipIds.has(t.Id)
+          && (t.CategoryName !== 'Kontooverførsel'
+              || matchedTransferIds.has(t.Id)
+              || oneSidedTransferTxIds.has(t.Id)
+              || externalTransferIds.has(t.Id));
+        if (contributed) dayAmount += parseDanishAmount(t.Amount);
+      }
+      expected -= dayAmount;
     }
 
-    if (divDate !== undefined) divergenceDates.set(acc, divDate);
+    if (lastReliableDate) reliableSinceDates.set(acc, lastReliableDate);
   }
 
   print(`Klassificering:`);
@@ -422,11 +594,15 @@ async function main() {
   print(`  Matchede overførsler (par): ${stats.matchedTransfers}`);
   if (stats.nameMatchedTransfers > 0)
     print(`     heraf navn-matchede:     ${stats.nameMatchedTransfers} (kontonavn i beskrivelse)`);
+  if (stats.oneSidedTransfers > 0)
+    print(`  Ensidede overførsler:       ${stats.oneSidedTransfers} (én side mangler i CSV → syntetisk modtager)`);
+  if (stats.externalTransfers > 0)
+    print(`  Eksterne overførsler:       ${stats.externalTransfers} (ukendt destination → importeret som Ignoreret)`);
   print(`  Ikke-matchede overf.:       ${stats.unmatchedTransfers} (sprunget over)`);
   print(`  Dubletter sprunget over:    ${stats.duplicatesSkipped} (samme konto+dato+beløb+beskrivelse+saldo)`);
   print(`  Overf.-dubletter sprunget:  ${stats.transferDuplicatesSkipped} (Kontooverørsel, samme konto+dato+beløb)\n`);
 
-  // --- Rapport over sprungne poster pr. konto ---
+  // --- Rapport over sprungne dubletter pr. konto ---
   function skippedSummary(label, list) {
     if (list.length === 0) return;
     print(`${label} (${list.length} poster):`);
@@ -448,14 +624,26 @@ async function main() {
     }
     print();
   }
-  skippedSummary('Ikke-matchede overførsler (sprunget over)', skippedUnmatched);
   skippedSummary('Ignorer-dubletter (sprunget over)', skippedDuplicates);
 
   // --- Kontooversigt med åbnings-/slutsaldo og saldo-pålidelighed ---
-  const skippedByAcc = new Map();
-  for (const t of skippedUnmatched) {
-    if (!skippedByAcc.has(t.AccountName)) skippedByAcc.set(t.AccountName, []);
-    skippedByAcc.get(t.AccountName).push(t);
+  // Byg per-konto lister for ensidede og eksterne overørsler
+  const oneSidedBySendingAcc = new Map();
+  const oneSidedByReceivingAcc = new Map();
+  for (const { tx, targetAcc } of oneSidedTransfers) {
+    if (!oneSidedBySendingAcc.has(tx.AccountName)) oneSidedBySendingAcc.set(tx.AccountName, []);
+    oneSidedBySendingAcc.get(tx.AccountName).push({ tx, targetAcc });
+    if (!oneSidedByReceivingAcc.has(targetAcc)) oneSidedByReceivingAcc.set(targetAcc, []);
+    oneSidedByReceivingAcc.get(targetAcc).push({ tx, targetAcc });
+  }
+  const externalByAcc = new Map();
+  for (const [accName, list] of toImport) {
+    for (const t of list) {
+      if (t.__targetCategory === 'Ignoreret' && t.CategoryName === 'Kontooverførsel') {
+        if (!externalByAcc.has(accName)) externalByAcc.set(accName, []);
+        externalByAcc.get(accName).push(t);
+      }
+    }
   }
 
   print(`Kontooversigt (åbningssaldo beregnet baglæns fra slutsaldo):`);
@@ -463,15 +651,39 @@ async function main() {
     const open  = (openingBalances.get(acc) ?? 0).toFixed(2).padStart(12);
     const close = (closingBalances.get(acc) ?? 0).toFixed(2).padStart(12);
     print(`  ${acc.padEnd(22)} åbn ${open} kr  →  slut ${close} kr`);
-    const skipped = skippedByAcc.get(acc);
-    if (skipped?.length > 0) {
-      const net    = skipped.reduce((s, t) => s + parseDanishAmount(t.Amount), 0);
-      const dates  = skipped.map(t => toIsoDate(t.Date)).sort();
+    const reliableDate = reliableSinceDates.get(acc);
+    if (reliableDate) {
+      // Find første transaktion i kontoens historik for kontrast
+      const firstDate = toIsoDate(byAccount.get(acc)[0].Date);
+      if (reliableDate !== firstDate) {
+        print(`    ✓  CSV-saldo pålidelig fra: ${reliableDate}`);
+        print(`       Tidligere historik (${firstDate} → ${reliableDate}) kan have manglende posteringer`);
+      }
+      // Hvis reliableDate === firstDate er hele kontoens historik pålidelig — ingen advarsel
+    } else {
+      // Aldrig fundet en pålidelig dato — slutsaldoen passer ikke engang
+      print(`    ⚠  Saldo kunne ikke verificeres mod CSV`);
+    }
+    const sending = oneSidedBySendingAcc.get(acc);
+    if (sending?.length > 0) {
+      const net   = sending.reduce((s, { tx }) => s + parseDanishAmount(tx.Amount), 0);
+      const dates = sending.map(({ tx }) => toIsoDate(tx.Date)).sort();
       const netStr = (net >= 0 ? '+' : '') + net.toFixed(2);
-      const divDate = divergenceDates.get(acc);
-      print(`    ⚠  ${skipped.length} overf. sprunget over (${dates[0]} → ${dates.at(-1)}, net ${netStr} kr)`);
-      if (divDate) print(`       Saldo afviger fra CSV fra: ${divDate}`);
-      print(`       Saldohistorik i denne periode kan afvige i Actual Budget`);
+      print(`    ↗  ${sending.length} ensidet overf. afsendt (${dates[0]} → ${dates.at(-1)}, net ${netStr} kr) — syntetisk modtager oprettet`);
+    }
+    const receiving = oneSidedByReceivingAcc.get(acc);
+    if (receiving?.length > 0) {
+      const net   = receiving.reduce((s, { tx }) => s - parseDanishAmount(tx.Amount), 0); // modsatrettet
+      const dates = receiving.map(({ tx }) => toIsoDate(tx.Date)).sort();
+      const netStr = (net >= 0 ? '+' : '') + net.toFixed(2);
+      print(`    ↙  ${receiving.length} ensidet overf. modtaget (${dates[0]} → ${dates.at(-1)}, net ${netStr} kr) — syntetisk, ingen CSV-rækker`);
+    }
+    const external = externalByAcc.get(acc);
+    if (external?.length > 0) {
+      const net   = external.reduce((s, t) => s + parseDanishAmount(t.Amount), 0);
+      const dates = external.map(t => toIsoDate(t.Date)).sort();
+      const netStr = (net >= 0 ? '+' : '') + net.toFixed(2);
+      print(`    ℹ  ${external.length} ekstern overf. som Ignoreret (${dates[0]} → ${dates.at(-1)}, net ${netStr} kr)`);
     }
   }
   print();
@@ -594,6 +806,33 @@ async function main() {
       payee: transferPayeeId,
       notes: notes || null,
       imported_id: `spiir-tx:${fromTx.Id}-${toTx.Id}`,
+      cleared: true,
+    });
+  }
+
+  // Ensidede overørsler: kun én side i CSV — send-siden importeres som transfer;
+  // Actual auto-opretter en tilsvarende modtager-transaktion på targetAcc.
+  for (const { tx, targetAcc } of oneSidedTransfers) {
+    const sendingAccId = accountIdByName.get(tx.AccountName);
+    const receivingAccId = accountIdByName.get(targetAcc);
+    if (!sendingAccId || !receivingAccId) continue;
+
+    // Beløbet i tx kan være enten negativt (afsender) eller positivt (modtager).
+    // Vi sørger for at transfer-siden altid har et negativt beløb (penge ud).
+    const amt = parseDanishAmount(tx.Amount);
+    const transferAccId = amt < 0 ? receivingAccId : sendingAccId;
+    const transferPayeeId = transferPayeeByAccountId.get(transferAccId);
+    if (!transferPayeeId) {
+      _origWarn(`Ingen transfer-payee for ensidet overørsel (${tx.AccountName} → ${targetAcc}) — springer over`);
+      continue;
+    }
+    const notes = [tx.OriginalDescription, tx.Comment].filter(Boolean).join(' | ');
+    pushTx(tx.AccountName, {
+      date: toIsoDate(tx.Date),
+      amount: toActualAmount(amt),
+      payee: transferPayeeId,
+      notes: notes || null,
+      imported_id: `spiir-onesided:${tx.Id}`,
       cleared: true,
     });
   }

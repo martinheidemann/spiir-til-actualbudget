@@ -156,6 +156,104 @@ Alle Spiir-transaktioner får et unikt ID (`spiir:<id>`) så de ikke dublikeres 
 
 ---
 
+## Hvad gør jeg hvis saldoen ikke passer med banken?
+
+Når importen er færdig kan du sammenligne dine kontosaldi i Actual Budget med dem i din netbank. I de fleste tilfælde matcher de præcist — men på konti med mange års historik kan der opstå små eller mellemstore afvigelser. Det er sjældent en fejl i programmet; det er typisk fordi Spiir-eksporten ikke er et 100 % korrekt billede af bankens historik.
+
+### Hvorfor kan Spiir-data være ufuldstændige?
+
+Spiir har eksisteret siden 2009 og synkroniserer med danske banker via skiftende grænseflader. Igennem 15+ år har det betydet:
+
+- **Manglende synkroniseringer.** Hvis Spiir i en periode ikke kunne forbinde til banken (vedligehold, ændrede API'er, login-problemer), kan enkelte dage eller uger mangle. Banken har transaktionerne, men de er aldrig nået ind i Spiir.
+- **CSV-formatet er blevet bedre over tid.** I CSV-eksporten findes feltet `CounterEntryId`, som linker de to sider af en overførsel mellem dine egne konti. Det fungerer godt for nyere data, men er ufuldstændigt for ældre data — i de tidlige år (særligt 2010-talet) mangler dette ID på en del overførsler. Programmet kompenserer ved at matche overførsler på beskrivelse + dato + beløb i et ekstra pas, og opretter syntetiske modparter når kun den ene side findes. Men er begge sider helt væk, kan vi ikke gætte os til dem.
+
+- **Duplikater og dataindstik.** Enkelte datoer har Spiir nogle gange importeret de samme bankposteringer to gange — undertiden med korrupte saldoværdier. Programmet detekterer og frasorterer disse, men hvis dubletten har lidt anderledes felter end originalen, kan en enkelt postering slippe igennem og påvirke saldoen.
+
+- **Bankoverførsler til konti uden for Spiir.** Pengeoverførsler til en realkreditkonto, en juniorkonto i en anden bank, eller en gammel lukket konto er reelle pengebevægelser, men kan ikke verificeres mod en modpart i CSV'en. Programmet importerer dem som almindelige posteringer med kategorien "Ignoreret".
+
+### Slutsaldoen er garanteret korrekt — men kun for én dato
+
+Programmet beregner åbningssaldoen *baglæns* ud fra slutsaldoen i CSV'en og alle de posteringer der faktisk importeres. Det betyder:
+
+- **Slutsaldoen på CSV-eksportdagen** vil matche banken præcist.
+- **Den nuværende bankbalance** kan godt afvige, simpelthen fordi der er sket noget på kontoen efter du eksporterede.
+- **Historisk saldo undervejs** kan afvige hvis der mangler posteringer. Programmet udskriver hvilke konti og fra hvilken dato det gælder.
+
+Sammenlign altid med slutsaldoen **fra den dag du eksporterede CSV'en** — ikke med dagens bank-app. Hvis du vil have det 100 % opdateret, eksportér en frisk CSV og kør importen igen (scriptet er idempotent — det dublerer ikke transaktioner).
+
+### Når slutsaldoen alligevel ikke matcher
+
+Hvis slutsaldoen ikke matcher, er årsagen typisk én af:
+
+1. **En manglende synkronisering i Spiir.** En transaktion banken kender, men Spiir aldrig fik. Den eneste rigtige løsning er at tilføje den manuelt i Actual Budget — eller justere åbningssaldoen så slutsaldoen passer (se næste sektion).
+2. **En duplikat der ikke blev fanget.** Hvis to næsten identiske posteringer slap igennem som forskellige, vil saldoen være højere/lavere end den burde. Find duplikatet i Actual Budget og slet det.
+3. **En overørsel der blev importeret som almindelig postering** fordi modparten manglede og beskrivelsen ikke nævnte en kendt konto. Det giver korrekt slutsaldo, men kontoen får posten under "Ignoreret" i stedet for som overførsel.
+
+---
+
+## Sådan retter du åbningssaldoen manuelt
+
+Hvis slutsaldoen i Actual Budget afviger fra banken med et fast beløb, kan du justere åbningssaldoen direkte. Det er en simpel "plus eller minus"-regning og kræver ingen genimport.
+
+### Trin 1 — Find afvigelsen
+
+For hver konto der ikke matcher, regn forskellen ud:
+
+```
+Afvigelse = bank − Actual Budget
+```
+
+Hvis tallet er **positivt** mangler Actual Budget penge — du skal *øge* åbningssaldoen med det beløb.
+Hvis tallet er **negativt** har Actual Budget for mange penge — du skal *sænke* åbningssaldoen med det beløb.
+
+### Trin 2 — Find åbningssaldo-transaktionen i Actual Budget
+
+1. Åbn Actual Budget og klik på kontoen i sidebaren
+2. Scroll helt til bunden af transaktionslisten (eller sortér efter dato — ældste først)
+3. Den allerførste transaktion er typisk en med teksten **"Starting Balance"** eller **"Åbningssaldo"** og payee "Starting Balance"
+
+### Trin 3 — Ret beløbet
+
+1. Klik på Starting Balance-transaktionens beløb
+2. Læg afvigelsen til (eller træk fra) det eksisterende beløb:
+
+   ```
+   Ny åbningssaldo = gammel åbningssaldo + afvigelse
+   ```
+
+3. Gem (tryk Enter eller klik væk fra feltet)
+4. Slutsaldoen i sidebaren bør nu matche banken præcist
+
+### Hurtig-formel
+
+```
+┌──────────────────────────────────────────────────────────┐
+│  ny åbningssaldo = gammel åbningssaldo + (bank − Actual) │
+└──────────────────────────────────────────────────────────┘
+```
+
+Det virker for alle konti uanset om åbningssaldoen er positiv eller negativ — du lægger bare differencen til.
+
+### Hvorfor virker det?
+
+I Actual Budget er en kontos saldo simpelthen: åbningssaldo + summen af alle transaktioner. Hvis transaktionerne er korrekte men slutsaldoen mangler et beløb X, så mangler X i åbningssaldoen. Du justerer ét sted, og hele saldohistorikken flytter sig X.
+
+> **OBS:** Hvis afvigelsen ER fordi der mangler en transaktion (ikke fordi åbningssaldoen er forkert), så får du det rigtige *slutbeløb* ved at justere åbningssaldoen — men dine historiske grafer i den manglende periode vil stadig se underlige ud. Vil du have det "rent" må du tilføje den manglende transaktion manuelt på den rigtige dato.
+
+### Vil du have ren historik fra start? Begræns eksporten
+
+Hvis du oplever mange afvigelser kan det give et pænere resultat at starte fra et tidspunkt hvor dine data er mere komplette. For mange brugere vil de seneste 3–5 år være fuldt dækkede og uden problemer.
+
+**Sådan begrænser du eksporten i Spiir:**
+
+1. Gå til **spiir.dk → Eksportér data → Avanceret eksport**
+2. Sæt en **startdato** — fx 1. januar 2020 eller 1. januar 2022
+3. Eksportér CSV-filen og brug den i stedet
+
+Åbningssaldoen justeres automatisk så slutsaldoen stadig passer, uanset hvilken startdato du vælger.
+
+---
+
 ## Filer i denne pakke
 
 ```
