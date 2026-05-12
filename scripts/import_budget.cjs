@@ -132,17 +132,8 @@ async function main() {
     arr.sort((a, b) => toIsoDate(a.Date).localeCompare(toIsoDate(b.Date)));
   }
 
-  // --- Beregn åbningssaldo pr. konto ---
-  // Spiirs Balance er saldoen EFTER transaktionen → opening = Balance - Amount på første postering
-  const openingBalances = new Map();
-  for (const [acc, arr] of byAccount) {
-    if (arr.length === 0) continue;
-    const first = arr[0];
-    const openBal = parseDanishAmount(first.Balance) - parseDanishAmount(first.Amount);
-    openingBalances.set(acc, openBal);
-  }
-
   // --- Beregn slutsaldo pr. konto (fra sidste postering) ---
+  // Åbningssaldo beregnes baglæns nedenfor, efter klassificering er afsluttet.
   const closingBalances = new Map();
   for (const [acc, arr] of byAccount) {
     if (arr.length === 0) continue;
@@ -365,6 +356,63 @@ async function main() {
     }
   }
 
+  // --- Beregn åbningssaldi baglæns fra slutsaldo ---
+  // Garanterer at Actual Budget slutsaldo altid er korrekt, uanset om der er
+  // oversprungne overførsler. Åbningssaldoen absorberer de manglende beløb.
+  //
+  // opening = closing − Σ(importerede posteringer på kontoen)
+  //   • regulære tx'er i toImport[acc]
+  //   • overførsler ud: fromTx.Amount (negativt) for par hvor fromTx.AccountName == acc
+  //   • overførsler ind: toTx.Amount (positivt) for par hvor toTx.AccountName == acc
+  //     (Actual auto-opretter modtager-siden, men den påvirker stadig saldoen)
+  const openingBalances = new Map();
+  for (const [acc] of byAccount) {
+    const closing = closingBalances.get(acc) ?? 0;
+    const regularSum = (toImport.get(acc) ?? [])
+      .reduce((s, t) => s + parseDanishAmount(t.Amount), 0);
+    let transferSum = 0;
+    for (const { fromTx, toTx } of transferPairs) {
+      if (fromTx.AccountName === acc) transferSum += parseDanishAmount(fromTx.Amount);
+      if (toTx.AccountName   === acc) transferSum += parseDanishAmount(toTx.Amount);
+    }
+    openingBalances.set(acc, closing - regularSum - transferSum);
+  }
+
+  // --- Beregn divergensdato pr. konto ---
+  // Gå posteringer igennem kronologisk og find første dato hvor den løbende
+  // beregnede balance afviger fra CSV-feltet Balance (reel banksaldo).
+  // Split-forældre springes over (børnene importeres og summerer til samme nettobeløb).
+  // Split-børn har tomt Balance-felt og springes over i check, men bidrager til runBal.
+  const matchedTransferIds = new Set(
+    transferPairs.flatMap(p => [p.fromTx.Id, p.toTx.Id])
+  );
+  const divergenceDates = new Map(); // acc → ISO-dato (første afvigelse) eller undef
+
+  for (const [acc, arr] of byAccount) {
+    let runBal = openingBalances.get(acc) ?? 0;
+    let divDate;
+
+    for (const t of arr) {
+      const isSplitParent = t.SplitGroupId && t.SplitGroupId === t.Id;
+
+      // Bidrager denne postering til saldoen i Actual Budget?
+      const contributed = !isSplitParent
+        && !skipIds.has(t.Id)
+        && !transferSkipIds.has(t.Id)
+        && (t.CategoryName !== 'Kontooverførsel' || matchedTransferIds.has(t.Id));
+
+      if (contributed) runBal += parseDanishAmount(t.Amount);
+
+      // Check: kun rækker med Balance-felt, ikke split-forældre
+      if (!isSplitParent && t.Balance && divDate === undefined) {
+        const csvBal = parseDanishAmount(t.Balance);
+        if (Math.abs(runBal - csvBal) > 0.01) divDate = toIsoDate(t.Date);
+      }
+    }
+
+    if (divDate !== undefined) divergenceDates.set(acc, divDate);
+  }
+
   print(`Klassificering:`);
   print(`  Regulære transaktioner:    ${stats.regular}`);
   print(`     heraf udlæg:             ${stats.udlaeg}`);
@@ -403,10 +451,29 @@ async function main() {
   skippedSummary('Ikke-matchede overførsler (sprunget over)', skippedUnmatched);
   skippedSummary('Ignorer-dubletter (sprunget over)', skippedDuplicates);
 
-  print(`Åbningssaldi (1. postering i Spiir):`);
-  for (const [acc, bal] of openingBalances) print(`  ${acc.padEnd(20)} ${bal.toFixed(2).padStart(12)} kr`);
-  print(`\nSlutsaldi (sidste postering i Spiir):`);
-  for (const [acc, bal] of closingBalances) print(`  ${acc.padEnd(20)} ${bal.toFixed(2).padStart(12)} kr`);
+  // --- Kontooversigt med åbnings-/slutsaldo og saldo-pålidelighed ---
+  const skippedByAcc = new Map();
+  for (const t of skippedUnmatched) {
+    if (!skippedByAcc.has(t.AccountName)) skippedByAcc.set(t.AccountName, []);
+    skippedByAcc.get(t.AccountName).push(t);
+  }
+
+  print(`Kontooversigt (åbningssaldo beregnet baglæns fra slutsaldo):`);
+  for (const [acc] of byAccount) {
+    const open  = (openingBalances.get(acc) ?? 0).toFixed(2).padStart(12);
+    const close = (closingBalances.get(acc) ?? 0).toFixed(2).padStart(12);
+    print(`  ${acc.padEnd(22)} åbn ${open} kr  →  slut ${close} kr`);
+    const skipped = skippedByAcc.get(acc);
+    if (skipped?.length > 0) {
+      const net    = skipped.reduce((s, t) => s + parseDanishAmount(t.Amount), 0);
+      const dates  = skipped.map(t => toIsoDate(t.Date)).sort();
+      const netStr = (net >= 0 ? '+' : '') + net.toFixed(2);
+      const divDate = divergenceDates.get(acc);
+      print(`    ⚠  ${skipped.length} overf. sprunget over (${dates[0]} → ${dates.at(-1)}, net ${netStr} kr)`);
+      if (divDate) print(`       Saldo afviger fra CSV fra: ${divDate}`);
+      print(`       Saldohistorik i denne periode kan afvige i Actual Budget`);
+    }
+  }
   print();
 
   if (DRY_RUN) {
