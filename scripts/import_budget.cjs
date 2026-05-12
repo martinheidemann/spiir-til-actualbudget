@@ -223,6 +223,7 @@ async function main() {
   const stats = {
     regular: 0,
     matchedTransfers: 0,
+    nameMatchedTransfers: 0,
     unmatchedTransfers: 0,
     duplicatesSkipped: 0,
     transferDuplicatesSkipped: 0,
@@ -310,6 +311,60 @@ async function main() {
     toImport.get(t.AccountName).push(t);
   }
 
+  // --- Andet overførsels-pas: name-baseret matching på skippedUnmatched ---
+  // Tidlige posteringer (typisk 2010-2014) mangler CounterEntryId, men afsender-siden
+  // har kontonavnet som beskrivelse (fx "Fælles konto", "Grundkonto").
+  // Vi finder par ved: beskrivelse indeholder et kendt kontonavn OG der er præcis én
+  // umatched postering i det pågældende konto med modsatrettet beløb på samme dato.
+  {
+    const knownAccNames = [...byAccount.keys()];
+
+    // Byg lookup: "accnamelower|dato|beløbFixed" → [tx, ...]
+    const unmatchedLookup = new Map();
+    for (const t of skippedUnmatched) {
+      const k = `${t.AccountName.toLowerCase()}|${t.Date}|${parseDanishAmount(t.Amount).toFixed(2)}`;
+      if (!unmatchedLookup.has(k)) unmatchedLookup.set(k, []);
+      unmatchedLookup.get(k).push(t);
+    }
+
+    const nameMatchedIds = new Set();
+
+    for (const t of [...skippedUnmatched]) {
+      if (nameMatchedIds.has(t.Id)) continue;
+      const desc = (t.Description || t.OriginalDescription || '').toLowerCase().trim();
+      const amtT = parseDanishAmount(t.Amount);
+
+      // Tjek om beskrivelsen indeholder et kendt kontonavn (andet end afsender-kontoen)
+      let targetAcc = null;
+      for (const accName of knownAccNames) {
+        if (accName.toLowerCase() === t.AccountName.toLowerCase()) continue;
+        if (desc.includes(accName.toLowerCase())) { targetAcc = accName; break; }
+      }
+      if (!targetAcc) continue;
+
+      // Find modpart i targetAcc: modsatrettet beløb, samme dato
+      const counterKey = `${targetAcc.toLowerCase()}|${t.Date}|${(-amtT).toFixed(2)}`;
+      const candidates = (unmatchedLookup.get(counterKey) || []).filter(c => !nameMatchedIds.has(c.Id));
+      if (candidates.length !== 1) continue; // ingen match eller tvetydig (>1)
+
+      const counter = candidates[0];
+      const fromTx = amtT < 0 ? t : counter;
+      const toTx   = amtT < 0 ? counter : t;
+      transferPairs.push({ fromTx, toTx });
+      nameMatchedIds.add(t.Id);
+      nameMatchedIds.add(counter.Id);
+    }
+
+    if (nameMatchedIds.size > 0) {
+      const pairs = nameMatchedIds.size / 2;
+      stats.nameMatchedTransfers = pairs;
+      stats.matchedTransfers     += pairs;
+      stats.unmatchedTransfers   -= nameMatchedIds.size;
+      skippedUnmatched.splice(0, skippedUnmatched.length,
+        ...skippedUnmatched.filter(t => !nameMatchedIds.has(t.Id)));
+    }
+  }
+
   print(`Klassificering:`);
   print(`  Regulære transaktioner:    ${stats.regular}`);
   print(`     heraf udlæg:             ${stats.udlaeg}`);
@@ -317,6 +372,8 @@ async function main() {
   print(`     heraf bevarede Ignorer:  ${stats.ignoredKept}`);
   print(`  Split-forældre sprunget:   ${stats.splitParentsSkipped} (kun børn importeres)`);
   print(`  Matchede overførsler (par): ${stats.matchedTransfers}`);
+  if (stats.nameMatchedTransfers > 0)
+    print(`     heraf navn-matchede:     ${stats.nameMatchedTransfers} (kontonavn i beskrivelse)`);
   print(`  Ikke-matchede overf.:       ${stats.unmatchedTransfers} (sprunget over)`);
   print(`  Dubletter sprunget over:    ${stats.duplicatesSkipped} (samme konto+dato+beløb+beskrivelse+saldo)`);
   print(`  Overf.-dubletter sprunget:  ${stats.transferDuplicatesSkipped} (Kontooverørsel, samme konto+dato+beløb)\n`);
