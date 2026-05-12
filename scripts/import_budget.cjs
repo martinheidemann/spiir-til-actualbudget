@@ -188,6 +188,34 @@ async function main() {
     for (let i = 1; i < sorted.length; i++) skipIds.add(sorted[i].Id);
   }
 
+  // --- Ekstra deduplikering af Kontooverførsel (uden Balance i nøglen) ---
+  // Transfer-dubletter kan have forskellig Balance end hinanden (begge posteringer
+  // registreres med den reelle saldo på afsendetidspunktet, men kun én er bankens
+  // egentlige bevægelse). De fanges ikke af den normal Balance-inkluderende dupKey,
+  // og ender ellers i listen over ikke-matchede overførsler.
+  // Vi kører et separat pas med 4-felts nøgle (AccountId+Dato+Beløb+Beskrivelse)
+  // kun for Kontooverførsel-rækker, og markerer alle-undtagen-én (laveste Id) til skip.
+  const transferDupKey = (t) => [
+    t.AccountId,
+    t.Date,
+    parseDanishAmount(t.Amount).toFixed(2),
+    (t.OriginalDescription || t.Description || '').trim(),
+  ].join('|');
+  const byTransferDupKey = new Map();
+  for (const t of txs) {
+    if (t.CategoryName !== 'Kontooverførsel') continue;
+    if (skipIds.has(t.Id)) continue; // allerede håndteret
+    const k = transferDupKey(t);
+    if (!byTransferDupKey.has(k)) byTransferDupKey.set(k, []);
+    byTransferDupKey.get(k).push(t);
+  }
+  const transferSkipIds = new Set();
+  for (const [, group] of byTransferDupKey) {
+    if (group.length <= 1) continue;
+    const sorted = [...group].sort((a, b) => (a.Id < b.Id ? -1 : 1));
+    for (let i = 1; i < sorted.length; i++) transferSkipIds.add(sorted[i].Id);
+  }
+
   // --- Klassificér transaktioner ---
   // For hver transfer-pair processerer vi kun ÉN side (den med negativt beløb / sender)
   // — så Actual selv opretter modtager-siden via transfer-payee
@@ -197,6 +225,7 @@ async function main() {
     matchedTransfers: 0,
     unmatchedTransfers: 0,
     duplicatesSkipped: 0,
+    transferDuplicatesSkipped: 0,
     ignoredKept: 0,
     udlaeg: 0,
     splitParentsSkipped: 0,
@@ -218,6 +247,15 @@ async function main() {
     // Duplikat: skip alle undtagen den udvalgte pr. dupKey-gruppe
     if (skipIds.has(t.Id)) {
       stats.duplicatesSkipped++;
+      skippedDuplicates.push(t);
+      continue;
+    }
+
+    // Transfer-dublet: Kontooverørsel-rækker med samme konto+dato+beløb+beskrivelse
+    // men potentielt forskellig Balance — disse fanges ikke af den normale dupKey.
+    // Køres FØR transfer-matching så dubletter ikke havner i listen over ikke-matchede overførsler.
+    if (transferSkipIds.has(t.Id)) {
+      stats.transferDuplicatesSkipped++;
       skippedDuplicates.push(t);
       continue;
     }
@@ -280,7 +318,8 @@ async function main() {
   print(`  Split-forældre sprunget:   ${stats.splitParentsSkipped} (kun børn importeres)`);
   print(`  Matchede overførsler (par): ${stats.matchedTransfers}`);
   print(`  Ikke-matchede overf.:       ${stats.unmatchedTransfers} (sprunget over)`);
-  print(`  Dubletter sprunget over:    ${stats.duplicatesSkipped} (samme konto+dato+beløb+beskrivelse)\n`);
+  print(`  Dubletter sprunget over:    ${stats.duplicatesSkipped} (samme konto+dato+beløb+beskrivelse+saldo)`);
+  print(`  Overf.-dubletter sprunget:  ${stats.transferDuplicatesSkipped} (Kontooverørsel, samme konto+dato+beløb)\n`);
 
   // --- Rapport over sprungne poster pr. konto ---
   function skippedSummary(label, list) {
