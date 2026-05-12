@@ -157,11 +157,15 @@ async function main() {
   // I tidlige Spiir-importer kunne samme bankpostering komme med to gange,
   // og brugeren markerede den ene som "Ignorer" manuelt. Disse skal skippes.
   // Nøgle: konto + dato + beløb + beskrivelse → liste af tx'er
+  // Balance medtages i nøglen: en reel postering ændrer altid balancen,
+  // så to rækker med samme balance er en ægte dublet — to rækker med
+  // forskellig balance er to legitime posteringer der tilfældigvis ligner hinanden.
   const dupKey = (t) => [
     t.AccountId,
     t.Date,
     parseDanishAmount(t.Amount).toFixed(2),
     (t.OriginalDescription || t.Description || '').trim(),
+    parseDanishAmount(t.Balance).toFixed(2),
   ].join('|');
   const byDupKey = new Map();
   for (const t of txs) {
