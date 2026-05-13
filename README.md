@@ -22,7 +22,7 @@ Da Spiir annoncerede lukning begyndte jeg at kigge efter alternativer og faldt o
 
 Jeg har skiftet Actual Budget til at køre **transaktionelt** i stedet for envelope-baseret — det gøres under Indstillinger i Actual Budget og passer bedre til den måde jeg tænker økonomi på.
 
-Dette er et **hobbyprojekt** som jeg primært har lavet til mig selv, men med håb om at det kan være nyttigt for andre Spiir-brugere. Jeg har testet det på **Windows** og **Linux (WSL)**, men ikke alle scenarier — så der kan sagtens være edge cases jeg ikke har stødt på. Prøv gerne et par gange og tjek fejlfindingssektionen nedenfor hvis noget driller. Er du stadig sidder fast, er du velkommen til at skrive til mig på **[martinheide+actual@gmail.com](mailto:martinheide+actual@gmail.com)** — ingen garantier for svartid, men jeg hjælper gerne.
+Dette er et **hobbyprojekt** som jeg primært har lavet til mig selv, men med håb om at det kan være nyttigt for andre Spiir-brugere. Jeg har testet det på **Windows** og **Linux (WSL)**, men ikke alle scenarier — så der kan sagtens være særlige situationer jeg ikke har stødt på. Prøv gerne et par gange og tjek fejlfindingssektionen nedenfor hvis noget driller. Er du stadig sidder fast, er du velkommen til at skrive til mig på **[martinheide+actual@gmail.com](mailto:martinheide+actual@gmail.com)** — ingen garantier for svartid, men jeg hjælper gerne.
 
 ### Automatisk bankintegration
 
@@ -121,7 +121,7 @@ Du behøver kun gøre dette én gang.
 
 > **WSL-brugere:** Sørg for at `npm install` er kørt inde fra WSL-terminalen, ikke fra Windows — native Node.js-moduler skal kompileres til det rigtige OS.
 
-Wizarden guider dig igennem hele migreringen i ét hug og spørger om følgende — tryk bare Enter for at springe et trin over:
+Guiden tager dig igennem hele migreringen i ét hug og spørger om følgende — tryk bare Enter for at springe et trin over:
 
 1. **URL til Actual Budget** — brug `http://localhost:5006` hvis du bruger Desktop App
 2. **Password** — det du satte i Trin 1
@@ -150,7 +150,7 @@ Du kan trække filer direkte ind i terminalvinduet i stedet for at skrive stien.
 
 Ja. Programmet er designet til at være **additivt** — det sletter aldrig noget eksisterende. Du kan trygt køre det på et budget der allerede har data fra en anden bank.
 
-Alle Spiir-transaktioner får et unikt ID (`spiir:<id>`) så de ikke dublikeres hvis du kører importen igen.
+Alle Spiir-transaktioner gemmes med et unikt ID, så de ikke importeres to gange — selv hvis du kører scriptet igen.
 
 > **Tip:** Lav en backup af dit Actual Budget inden du kører migreringen — enten via Actual Budgets egen export-funktion eller ved at kopiere data-mappen.
 
@@ -165,11 +165,11 @@ Når importen er færdig kan du sammenligne dine kontosaldi i Actual Budget med 
 Spiir har eksisteret siden 2009 og synkroniserer med danske banker via skiftende grænseflader. Igennem 15+ år har det betydet:
 
 - **Manglende synkroniseringer.** Hvis Spiir i en periode ikke kunne forbinde til banken (vedligehold, ændrede API'er, login-problemer), kan enkelte dage eller uger mangle. Banken har transaktionerne, men de er aldrig nået ind i Spiir.
-- **CSV-formatet er blevet bedre over tid.** I CSV-eksporten findes feltet `CounterEntryId`, som linker de to sider af en overførsel mellem dine egne konti. Det fungerer godt for nyere data, men er ufuldstændigt for ældre data — i de tidlige år (særligt 2010-talet) mangler dette ID på en del overførsler. Programmet kompenserer ved at matche overførsler på beskrivelse + dato + beløb i et ekstra pas, og opretter syntetiske modparter når kun den ene side findes. Men er begge sider helt væk, kan vi ikke gætte os til dem.
+- **CSV-formatet er blevet bedre over tid.** Nyere overførsler mellem dine egne konti er korrekt forbundne i CSV'en, men for ældre data — særligt fra 2010-erne — mangler forbindelsen på en del overførsler. Programmet forsøger at genfinde disse ved at matche på beskrivelse, dato og beløb i en ekstra gennemgang, og opretter selv den manglende modpostering når kun den ene side findes. Er begge sider helt væk, kan vi ikke gætte os til dem.
 
-- **Duplikater og dataindstik.** Enkelte datoer har Spiir nogle gange importeret de samme bankposteringer to gange — undertiden med korrupte saldoværdier. Programmet detekterer og frasorterer disse, men hvis dubletten har lidt anderledes felter end originalen, kan en enkelt postering slippe igennem og påvirke saldoen.
+- **Duplikater og fejlimporter.** Enkelte datoer har Spiir nogle gange importeret de samme bankposteringer to gange — undertiden med korrupte saldoværdier. Programmet detekterer og frasorterer disse, men hvis dubletten har lidt anderledes felter end originalen, kan en enkelt postering slippe igennem og påvirke saldoen.
 
-- **Bankoverførsler til konti uden for Spiir.** Pengeoverførsler til en realkreditkonto, en juniorkonto i en anden bank, eller en gammel lukket konto er reelle pengebevægelser, men kan ikke verificeres mod en modpart i CSV'en. Programmet importerer dem som almindelige posteringer med kategorien "Ignoreret".
+- **Bankoverførsler til konti uden for Spiir.** Pengeoverførsler til en realkreditkonto, en konto hos en anden bank, eller en gammel lukket konto er reelle pengebevægelser, men kan ikke verificeres mod en modpart i CSV'en. Programmet importerer dem som almindelige posteringer med kategorien "Ignoreret".
 
 ### Slutsaldoen er garanteret korrekt — men kun for én dato
 
@@ -179,7 +179,7 @@ Programmet beregner åbningssaldoen *baglæns* ud fra slutsaldoen i CSV'en og al
 - **Den nuværende bankbalance** kan godt afvige, simpelthen fordi der er sket noget på kontoen efter du eksporterede.
 - **Historisk saldo undervejs** kan afvige hvis der mangler posteringer. Programmet udskriver hvilke konti og fra hvilken dato det gælder.
 
-Sammenlign altid med slutsaldoen **fra den dag du eksporterede CSV'en** — ikke med dagens bank-app. Hvis du vil have det 100 % opdateret, eksportér en frisk CSV og kør importen igen (scriptet er idempotent — det dublerer ikke transaktioner).
+Sammenlign altid med slutsaldoen **fra den dag du eksporterede CSV'en** — ikke med dagens bank-app. Hvis du vil have det 100 % opdateret, eksportér en frisk CSV og kør importen igen (du kan køre det igen uden problemer — transaktioner importeres aldrig to gange).
 
 ### Når slutsaldoen alligevel ikke matcher
 
@@ -187,7 +187,7 @@ Hvis slutsaldoen ikke matcher, er årsagen typisk én af:
 
 1. **En manglende synkronisering i Spiir.** En transaktion banken kender, men Spiir aldrig fik. Den eneste rigtige løsning er at tilføje den manuelt i Actual Budget — eller justere åbningssaldoen så slutsaldoen passer (se næste sektion).
 2. **En duplikat der ikke blev fanget.** Hvis to næsten identiske posteringer slap igennem som forskellige, vil saldoen være højere/lavere end den burde. Find duplikatet i Actual Budget og slet det.
-3. **En overørsel der blev importeret som almindelig postering** fordi modparten manglede og beskrivelsen ikke nævnte en kendt konto. Det giver korrekt slutsaldo, men kontoen får posten under "Ignoreret" i stedet for som overførsel.
+3. **En overførsel der blev importeret som almindelig postering** fordi modparten manglede og beskrivelsen ikke nævnte en kendt konto. Det giver korrekt slutsaldo, men kontoen får posten under "Ignoreret" i stedet for som overførsel.
 
 ---
 
@@ -283,7 +283,7 @@ Actual Budget er ikke startet, eller du har ikke oprettet et budget endnu. Åbn 
 Tjek at stien til CSV-filen er korrekt. Prøv at trække filen direkte ind i terminalvinduet.
 
 **Importen stopper med en fejl**
-Scriptet er idempotent — du kan bare køre det igen. Det vil fortsætte fra der hvor det slap (kendte transaktioner springes over, nye tilføjes).
+Scriptet husker hvilke transaktioner det allerede har importeret — du kan bare køre det igen. Det vil fortsætte fra der hvor det slap (kendte transaktioner springes over, nye tilføjes).
 
 **Actual Budget viser en spinner og reagerer ikke**
 Budgettet kan være kommet i en korrupt tilstand. Slet det i Actual Budget UI og opret et nyt tomt budget, og kør migreringen igen.
@@ -298,7 +298,7 @@ Prøv et par gange og tjek fejlbeskeden grundigt. Virker det stadig ikke, er du 
 
 ## Avanceret brug
 
-### Manuel kørsel (uden wizard)
+### Manuel kørsel (uden guide)
 
 ```powershell
 # Importér kategorier og transaktioner fra CSV
