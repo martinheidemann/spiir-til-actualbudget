@@ -61,6 +61,12 @@ if (!fs.existsSync(CSV_FILE)) {
   console.error(`CSV-fil ikke fundet: ${CSV_FILE}`);
   process.exit(1);
 }
+if (path.extname(CSV_FILE).toLowerCase() === '.xlsx') {
+  console.error('Fejl: Dette script forventer en CSV-fil, ikke en Excel-fil.');
+  console.error('      Brug sync_budget.cjs til at importere budgetbeløb fra Excel:');
+  console.error(`      node scripts/sync_budget.cjs "${csvArg}"`);
+  process.exit(1);
+}
 if (!SERVER_URL && !DRY_RUN) { console.error('Mangler ACTUAL_SERVER_URL i .env.'); process.exit(1); }
 if (!PASSWORD && !DRY_RUN) { console.error('Mangler ACTUAL_PASSWORD i .env.'); process.exit(1); }
 
