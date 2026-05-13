@@ -273,6 +273,9 @@ spiir-til-actual/
 
 ## Fejlfinding
 
+**Fejl under "Installerer programpakker" (npm install)**
+Det kan ske at npm ikke kan hente alle pakker første gang — typisk pga. netværk eller en midlertidig fejl. Luk vinduet og dobbeltklik på `migrate.bat` igen. Scriptet prøver automatisk at installere pakkerne forfra.
+
 **"Authentication failed: too-many-requests"**
 Actual Budget blokerer for mange loginforsøg på én gang. Vent 5–10 minutter og prøv igen.
 
