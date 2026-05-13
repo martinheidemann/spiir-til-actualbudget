@@ -95,6 +95,21 @@ async function quietly(fn) {
   finally { console.log = prevLog; console.warn = prevWarn; console.error = prevError; }
 }
 
+/** Kør en async funktion med automatisk retry ved transient sync-fejl */
+async function withRetry(fn, { retries = 3, delayMs = 8000, label = '' } = {}) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (attempt === retries) throw e;
+      process.stdout.write('\n');
+      printerr(`  Sync-fejl (forsøg ${attempt}/${retries})${label ? ' — ' + label : ''}: ${e.message}`);
+      printerr(`  Prøver igen om ${delayMs / 1000} sekunder...`);
+      await new Promise(r => setTimeout(r, delayMs));
+    }
+  }
+}
+
 /** Undertrykk alle tre console-metoder permanent (bruges efter API-forbindelsen er oppe,
  *  så asynkrone baggrundscallbacks ikke kan lække igennem mellem quietly()-kald). */
 function silenceForever() {
@@ -849,7 +864,7 @@ async function main() {
     for (let i = 0; i < list.length; i += BATCH_SIZE) {
       const batch = list.slice(i, i + BATCH_SIZE);
       showProgress(accName, i, list.length);
-      const result = await quietly(() => api.importTransactions(accId, batch));
+      const result = await withRetry(() => quietly(() => api.importTransactions(accId, batch)), { label: accName });
       added += result.added?.length || 0;
       updated += result.updated?.length || 0;
       // Tving sync til serveren mellem hver batch

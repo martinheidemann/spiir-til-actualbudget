@@ -276,6 +276,9 @@ spiir-til-actual/
 **Fejl under "Installerer programpakker" (npm install)**
 Det kan ske at npm ikke kan hente alle pakker første gang — typisk pga. netværk eller en midlertidig fejl. Luk vinduet og dobbeltklik på `migrate.bat` igen. Scriptet prøver automatisk at installere pakkerne forfra.
 
+**Sync-fejl midt under importen ("Error at handlers$1.api/sync")**
+Actual Budget's synkronisering til serveren fejlede midlertidigt — typisk pga. netværkshik eller at serveren er optaget. Scriptet prøver automatisk tre gange med 8 sekunders pause. Sker det alligevel, kan du bare køre migreringen igen — scriptet husker hvilke transaktioner der allerede er importeret og fortsætter fra der hvor det slap.
+
 **"Authentication failed: too-many-requests"**
 Actual Budget blokerer for mange loginforsøg på én gang. Vent 5–10 minutter og prøv igen.
 
