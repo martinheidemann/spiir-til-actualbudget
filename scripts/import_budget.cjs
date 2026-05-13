@@ -880,7 +880,9 @@ async function main() {
   // Auto-oprettede modtager-sider af transfers arver ikke cleared-status fra
   // import-kaldet. Vi kører derfor et ekstra pas der retter alle ucleared poster
   // — alle Spiir-transaktioner er historiske og skal være cleared.
-  // Synkroniseres i batches for at undgå PayloadTooLargeError/network-failure.
+  // Eksplicitte api.sync()-kald er fjernet fra dette pas: hvert updateTransaction
+  // synkroniserer internt, og et ekstra sync-kald på tværs af det giver ustabile
+  // tilstande i WSL/langsom netværksmiljøer. Ét samlet sync sker til sidst.
   print('\nMarkerer ucleared transaktioner som cleared...');
   let totalCleared = 0;
   for (const [accName, accId] of accountIdByName) {
@@ -891,10 +893,8 @@ async function main() {
       const batch = uncleared.slice(i, i + BATCH_SIZE);
       showProgress(accName, i, uncleared.length);
       for (const t of batch) {
-        await quietly(() => api.updateTransaction(t.id, { cleared: true }));
+        await withRetry(() => quietly(() => api.updateTransaction(t.id, { cleared: true })));
       }
-      try { await quietly(() => api.sync()); }
-      catch (e) { process.stdout.write('\n'); printerr(`  Sync-advarsel: ${e.message}`); }
     }
     showProgress(accName, uncleared.length, uncleared.length);
     process.stdout.write('\n');
@@ -903,9 +903,30 @@ async function main() {
   }
   if (totalCleared === 0) print('  Alle poster var allerede cleared.');
 
+  // Afsluttende sync efter alle cleared-opdateringer
+  try { await withRetry(() => quietly(() => api.sync())); }
+  catch (e) { printerr(`  Advarsel: afsluttende sync fejlede: ${e.message}`); }
+
   try { await quietly(() => api.shutdown()); } catch (e) { /* shutdown syncer internt — ignorer fejl */ }
   print('\nFærdig! Husk at sammenligne slutsaldi ovenfor med Actual Budget.');
 }
+
+// Fang uventede async-fejl fra @actual-app/api's interne sync-operationer.
+// Disse kastes som unhandledRejection og crasher Node ellers uden at blive fanget
+// af main().catch() — fx hvis api.updateTransaction internt kicker en sync i gang
+// der fejler asynkront.
+process.on('unhandledRejection', (reason) => {
+  const msg = reason?.message || String(reason);
+  if (msg.includes('api/sync') || msg.includes('network-failure') || msg.includes('getSyncError')) {
+    // Transient sync-fejl fra Actual Budget API — log og ignorer.
+    // Scriptet er idempotent: køres det igen, importeres kun det der mangler.
+    printerr(`\n  Advarsel: intern sync-fejl ignoreret: ${msg}`);
+    printerr('  Kør scriptet igen hvis noget mangler — det fortsætter fra der af.');
+  } else {
+    printerr('\nUventet fejl:', msg);
+    process.exit(1);
+  }
+});
 
 main().catch(async err => {
   // Vis fejltype og reason hvis det er en sync/PostError
@@ -915,7 +936,7 @@ main().catch(async err => {
   printerr(err.stack);
   if (reason === 'network-failure' || err.message?.includes('network-failure')) {
     printerr('\nTip: Actual Budget serveren afviste sync-kaldet (network-failure).');
-    printerr('     Prøv at køre scriptet igen — det er idempotent og fortsætter fra der af.');
+    printerr('     Prøv at køre scriptet igen — det fortsætter fra der af.');
     printerr('     Hvis fejlen gentager sig: slet budgettet i Actual Budget UI og start forfra.');
   }
   try { await api.shutdown(); } catch {}
