@@ -81,6 +81,14 @@ function toIsoDate(ddmmyyyy) {
   const [d, m, y] = ddmmyyyy.split('-');
   return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
 }
+function effectiveDate(tx) {
+  // PATCH: respect Spiir's CustomDate when set. Spiir lets users override the
+  // transaction date (e.g. to align a December payment with January's budget).
+  // The original script ignored CustomDate, putting transactions in their bank
+  // posting month instead of the user's chosen logical month.
+  const cd = (tx.CustomDate || '').trim();
+  return cd || tx.Date;
+}
 // Actual API forventer beløb som heltal (øre)
 function toActualAmount(kr) {
   return Math.round(kr * 100);
@@ -473,8 +481,20 @@ async function main() {
       const desc = (t.Description || t.OriginalDescription || '').toLowerCase().trim();
       let targetAcc = null;
       for (const accName of knownAccNames) {
-        if (accName.toLowerCase() !== t.AccountName.toLowerCase()
-            && desc.includes(accName.toLowerCase())) {
+        const lower = accName.toLowerCase();
+        if (lower === t.AccountName.toLowerCase()) continue;
+        // PATCH: tighter match. The original `desc.includes(lower)` was too loose
+        // — "Fra Ebba budgetkonto" wrongly matched the user's shared "Budgetkonto",
+        // because "Ebba budgetkonto" contains "budgetkonto" as a substring.
+        // Require the account name to appear at the start of the description OR
+        // directly after a Danish/English direction prefix (til/fra/to/from),
+        // and to be followed by a word boundary or end-of-string.
+        const escaped = lower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const pattern = new RegExp(
+          `(?:^|\\b(?:til|fra|to|from)\\s+)${escaped}(?:\\s|$|[^\\p{L}\\p{N}])`,
+          'iu'
+        );
+        if (pattern.test(desc)) {
           targetAcc = accName;
           break;
         }
@@ -799,7 +819,7 @@ async function main() {
       // Tags droppes — Comment indeholder allerede #tag-versionen som Actual renderer korrekt
       const notes = [t.OriginalDescription, t.Comment].filter(Boolean).join(' | ');
       pushTx(accName, {
-        date: toIsoDate(t.Date),
+        date: toIsoDate(effectiveDate(t)),
         amount: toActualAmount(parseDanishAmount(t.Amount)),
         payee_name: (t.Description || '').trim() || null,
         notes: notes || null,
@@ -822,7 +842,7 @@ async function main() {
     }
     const notes = [fromTx.OriginalDescription, fromTx.Comment].filter(Boolean).join(' | ');
     pushTx(fromTx.AccountName, {
-      date: toIsoDate(fromTx.Date),
+      date: toIsoDate(effectiveDate(fromTx)),
       amount: toActualAmount(parseDanishAmount(fromTx.Amount)),
       payee: transferPayeeId,
       notes: notes || null,
@@ -839,9 +859,13 @@ async function main() {
     if (!sendingAccId || !receivingAccId) continue;
 
     // Beløbet i tx kan være enten negativt (afsender) eller positivt (modtager).
-    // Vi sørger for at transfer-siden altid har et negativt beløb (penge ud).
     const amt = parseDanishAmount(tx.Amount);
-    const transferAccId = amt < 0 ? receivingAccId : sendingAccId;
+    // PATCH: the transfer payee always represents the OTHER account (targetAcc),
+    // regardless of amount sign. The original `amt < 0 ? receivingAccId : sendingAccId`
+    // pointed back at the same account for positive amounts, which made Actual
+    // create a self-transfer that cancelled out — moving 17000 kr to the wrong
+    // account in the opening-balance computation.
+    const transferAccId = receivingAccId;
     const transferPayeeId = transferPayeeByAccountId.get(transferAccId);
     if (!transferPayeeId) {
       _origWarn(`Ingen transfer-payee for ensidet overørsel (${tx.AccountName} → ${targetAcc}) — springer over`);
@@ -849,7 +873,7 @@ async function main() {
     }
     const notes = [tx.OriginalDescription, tx.Comment].filter(Boolean).join(' | ');
     pushTx(tx.AccountName, {
-      date: toIsoDate(tx.Date),
+      date: toIsoDate(effectiveDate(tx)),
       amount: toActualAmount(amt),
       payee: transferPayeeId,
       notes: notes || null,
